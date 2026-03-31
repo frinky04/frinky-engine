@@ -1,4 +1,4 @@
-# Docs Workspace
+# Maintaining Docs
 
 This file is for maintaining the documentation workspace in the repository. The public VitePress home page lives at [`docs/index.md`](index.md).
 
@@ -19,9 +19,9 @@ npm run docs:build
 
 ## Structure
 
-- `index.md` is the VitePress home page.
-- Top-level guide files map to the main docs sidebar.
-- `roadmaps/` contains planning and implementation roadmap pages.
+- `index.md` is the public docs home page.
+- Top-level guide files are the main hand-written user docs.
+- `roadmaps/` contains planning and implementation notes that are intentionally outside the main user flow.
 - `api/` contains generated API docs.
 
 ## Generated API Docs

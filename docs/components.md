@@ -1,63 +1,151 @@
-# Components Reference
+# Choosing Components
 
-All built-in components and their key properties. For information on writing custom components, see [Scripting](scripting.md).
+Use this page when you know what you want to build, but you are not sure which built-in components belong on the entity.
 
-## Rendering
+## Common Setups
 
-| Component | Key Properties |
-|-----------|---------------|
-| `CameraComponent` | `FieldOfView` (60), `NearPlane` (0.1), `FarPlane` (1000), `Projection` (Perspective/Orthographic), `ClearColor`, `IsMain` |
-| `LightComponent` | `LightType` (Directional/Point/Skylight), `LightColor`, `Intensity` (1.0), `Range` (10.0) |
-| `MeshRendererComponent` | `ModelPath`, `MaterialSlots` (list of `Material`), `Tint`, `EditorOnly` |
-| `SkinnedMeshAnimatorComponent` | `AnimationSources` (list of .glb asset paths for multi-source animation loading), `UseEmbeddedAnimations` (true), `PlayAutomatically` (true), `Loop` (true), `PlaybackSpeed` (1.0), `ClipIndex` (0), `Playing` (true), `LoopFrameTrim` (1, advanced) |
-| `InverseKinematicsComponent` | `Solvers` (list of IK solver objects, processed in order) |
-| `PostProcessStackComponent` | `PostProcessingEnabled` (true), `Effects` (list of effects) |
+### A player or character you can move
 
-### Animation Export Tips
+Start with:
 
-- **Disable "Sampling Animations"** in Blender's glTF export settings. Enabling it bakes in-between keyframes that can make interpolation appear to step or stutter.
-- **Start animations at frame 0.** The engine expects the first keyframe at the beginning of the clip.
-- **Looping animations automatically trim the duplicate seam frame.** glTF exports include a duplicate of the first frame at the end for loop continuity; the engine skips it by default (`LoopFrameTrim = 1`). If you still see a hitch at the loop boundary, try increasing `LoopFrameTrim` in the Advanced section of the inspector.
+- `RigidbodyComponent` with `MotionType = Dynamic`
+- `CapsuleColliderComponent`
+- `CharacterControllerComponent`
 
-## Primitives
+Add `SimplePlayerInputComponent` if you want the built-in input-driven movement setup.
 
-| Component | Key Properties |
-|-----------|---------------|
-| `CubePrimitive` | `Width` (1), `Height` (1), `Depth` (1), `Material` |
-| `SpherePrimitive` | `Radius` (0.5), `Rings` (16), `Slices` (16), `Material` |
-| `PlanePrimitive` | `Width` (10), `Depth` (10), `ResolutionX` (1), `ResolutionZ` (1), `Material` |
-| `CylinderPrimitive` | `Radius` (0.5), `Height` (2), `Slices` (16), `Material` |
+Important:
 
-## Physics
+- the capsule must be the first enabled collider on the entity for the built-in character controller path
 
-| Component | Key Properties |
-|-----------|---------------|
-| `RigidbodyComponent` | `MotionType` (Dynamic/Kinematic/Static), `Mass` (1.0), `LinearDamping` (0.03), `AngularDamping` (0.03), `ContinuousDetection`, axis locks |
-| `BoxColliderComponent` | `Size` (1,1,1), `Center`, `IsTrigger` |
-| `SphereColliderComponent` | `Radius` (0.5), `Center`, `IsTrigger` |
-| `CapsuleColliderComponent` | `Radius` (0.5), `Length` (1.0), `Center`, `IsTrigger` |
-| `MeshColliderComponent` | `MeshPath`, `UseMeshRendererWhenEmpty` (true), `Center`, `IsTrigger` |
-| `CharacterControllerComponent` | `MoveSpeed` (4), `JumpVelocity` (6), `MaxSlopeDegrees` (45), `CrouchHeightScale` (0.5), `CrouchSpeedScale` (0.5), air control settings |
+Use this for:
 
-## Input
+- walking characters
+- jump and crouch gameplay
+- controllable prototypes
 
-| Component | Key Properties |
-|-----------|---------------|
-| `SimplePlayerInputComponent` | Movement keys, mouse look, `CrouchKey` (LeftControl), `AdjustCameraOnCrouch`, `CameraEntity` (EntityReference), `UseCharacterController` |
+See [Physics](physics.md) for the full movement workflow.
 
-## Audio
+### A static trigger volume
 
-| Component | Key Properties |
-|-----------|---------------|
-| `AudioSourceComponent` | `SoundPath`, `PlayOnStart`, `Spatialized`, `Looping`, `Bus`, `Volume`, `Pitch`, `Attenuation` |
-| `AudioListenerComponent` | `IsPrimary`, `MasterVolumeScale` |
+Start with:
 
-## Materials
+- `BoxColliderComponent`, `SphereColliderComponent`, or `CapsuleColliderComponent`
+- `IsTrigger = true`
 
-Both `MeshRendererComponent` (via `MaterialSlots` list) and primitive components (via a single `Material` property) use the `Material` class. Three material types are available:
+You usually do not need a rigidbody for a simple trigger volume.
 
-| Type | Description |
-|------|-------------|
-| `SolidColor` | Flat color (default) |
-| `Textured` | Albedo texture mapped with UV coordinates |
-| `TriplanarTexture` | Texture projected along world/local axes, configurable scale and blend sharpness |
+Use this for:
+
+- pickups
+- detection areas
+- scripted zone events
+
+### A visible 3D model
+
+Start with:
+
+- `MeshRendererComponent`
+
+Add:
+
+- `LightComponent` elsewhere in the scene so the model is visible
+- collider and rigidbody components if the model should participate in physics
+
+Use this for:
+
+- imported props
+- environment art
+- visible gameplay objects
+
+### An animated character or prop
+
+Start with:
+
+- `MeshRendererComponent`
+- `SkinnedMeshAnimatorComponent`
+
+Optionally add:
+
+- `InverseKinematicsComponent` for IK solvers
+
+Use this for:
+
+- skinned characters
+- animated creatures
+- animated props with imported clips
+
+See [Rendering & Post-Processing](rendering.md) for the setup flow.
+
+### A camera
+
+Start with:
+
+- `CameraComponent`
+
+Set `IsMain = true` on the camera you want the scene to render from.
+
+Optionally add:
+
+- `PostProcessStackComponent` for bloom, fog, SSAO, palette, or dither effects
+
+### A light source
+
+Start with:
+
+- `LightComponent`
+
+Choose the light type based on the job:
+
+- `Directional` for sunlight-style lighting
+- `Point` for local lights
+- `Skylight` for ambient base illumination
+
+### A sound emitter
+
+Start with:
+
+- `AudioSourceComponent`
+
+Set:
+
+- `Spatialized = false` for UI or global 2D sounds
+- `Spatialized = true` for in-world 3D sounds
+
+Add an `AudioListenerComponent` to the listener entity if you want an explicit 3D audio listener.
+
+See [Audio](audio.md) for usage patterns.
+
+### A reusable gameplay object
+
+Use a prefab instead of assembling the same entity tree repeatedly.
+
+Typical prefab contents:
+
+- visual components
+- physics components
+- gameplay script components
+- child entities and references
+
+See [Prefabs & Entity References](prefabs.md).
+
+## Quick Reference
+
+| Goal | Components |
+|------|------------|
+| Move a character | `RigidbodyComponent`, `CapsuleColliderComponent`, `CharacterControllerComponent` (`CapsuleColliderComponent` must be the first enabled collider) |
+| Detect overlaps | Any collider with `IsTrigger = true` |
+| Show a model | `MeshRendererComponent` |
+| Play imported animation | `MeshRendererComponent`, `SkinnedMeshAnimatorComponent` |
+| Render the scene | `CameraComponent` |
+| Add lighting | `LightComponent` |
+| Post-processing | `CameraComponent`, `PostProcessStackComponent` |
+| Persistent sound source | `AudioSourceComponent` |
+| Explicit 3D listener | `AudioListenerComponent` |
+
+## When to Use Topic Guides Instead
+
+- Go to [Physics](physics.md) when setup order and motion type matter.
+- Go to [Rendering](rendering.md) when cameras, lighting, materials, or animation matter.
+- Go to [Audio](audio.md) when you need routing, buses, or 3D sound.
+- Go to [Scripting](scripting.md) when you need custom gameplay behavior.

@@ -1,24 +1,30 @@
 # Getting Started
 
-This guide walks you through installing FrinkyEngine, creating a game project, and running it.
+Use this guide when you want the fastest path from "I have the engine" to "I can launch a project and see it run."
 
 ## Prerequisites
 
 - [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0)
-- Windows for `.bat` helper scripts (or use `dotnet` commands directly on any platform)
+- Windows for `.bat` helper scripts, or use the equivalent `dotnet` commands directly
 
-## Download a Release or Build from Source
+## Choose Your Starting Path
 
-If you want to try the editor or runtime without building the repository yourself, download a packaged release from [GitHub Releases](https://github.com/frinky04/frinky-engine/releases).
+Use a release if you want to try the editor quickly. Use source if you want the latest code, example projects, or to work on the engine itself.
 
-If you want the latest source, example projects, or engine code for local development, clone the repository instead.
+### Release Build
 
-## Clone the Repository
+1. Download a packaged release from [GitHub Releases](https://github.com/frinky04/frinky-engine/releases).
+2. Extract it to a normal writable folder.
+3. Launch `FrinkyEngine.Editor.exe`.
+4. Create or open a project in the editor.
 
-Example projects are stored as git submodules. Clone with `--recurse-submodules` to include them:
+### Source Build
+
+Clone the repository with submodules:
 
 ```bash
 git clone --recurse-submodules https://github.com/frinky04/FrinkyEngine.git
+cd FrinkyEngine
 ```
 
 If you already cloned without submodules:
@@ -27,19 +33,17 @@ If you already cloned without submodules:
 git submodule update --init --recursive
 ```
 
-## Build
+Build the solution:
 
 ```powershell
 .\build.bat
 ```
 
-Or with dotnet directly:
-
 ```bash
 dotnet build FrinkyEngine.sln -c Release
 ```
 
-## Launch the Editor
+Launch the editor:
 
 ```powershell
 .\launch-editor.bat
@@ -49,7 +53,13 @@ dotnet build FrinkyEngine.sln -c Release
 dotnet run --project src/FrinkyEngine.Editor
 ```
 
-To open a specific project:
+## First Success
+
+The goal here is simple: prove the editor, project loading, and play loop work on your machine.
+
+### Fastest path from source
+
+Open the included example project:
 
 ```powershell
 .\launch-editor.bat ExampleGames\PrefabTestingGround\PrefabTestingGround.fproject
@@ -59,7 +69,23 @@ To open a specific project:
 dotnet run --project src/FrinkyEngine.Editor -- ExampleGames/PrefabTestingGround/PrefabTestingGround.fproject
 ```
 
-## Create a New Game Project
+Then:
+
+1. Wait for the project to finish loading.
+2. Press `F5` to enter Play mode.
+3. Confirm the scene runs from the main camera.
+4. Press `F5` again to stop.
+
+### Fastest path from a release build
+
+1. Launch the editor.
+2. Create a project with `File -> New Project`.
+3. Save it to a normal writable folder.
+4. Open the default scene or create one.
+5. Press `F5` to enter Play mode.
+6. Confirm the project runs and returns to the editor when you stop.
+
+## Create a New Game Project from Source
 
 Install the template:
 
@@ -87,34 +113,44 @@ MyGame/
     Scenes/MainScene.fscene
     Scripts/
       RotatorComponent.cs
-      CharacterControllerExample.cs
   .gitignore
 ```
 
-The template `.csproj` includes a placeholder comment for `FrinkyEngine.Core`. Add a `ProjectReference` to your local `src/FrinkyEngine.Core/FrinkyEngine.Core.csproj`.
+The `dotnet new` template `.csproj` includes a placeholder comment for `FrinkyEngine.Core`. Add a `ProjectReference` to your local `src/FrinkyEngine.Core/FrinkyEngine.Core.csproj` if you are using the template path from source. The editor's `File -> New Project` flow generates a project file that already points at the running editor's engine DLL instead.
+
+After creating the project:
+
+1. Open the `.fproject` in the editor.
+2. Build scripts with `File -> Build Scripts` or `Ctrl+B`.
+3. Press `F5` to confirm the project runs.
+
+## What Success Looks Like
+
+You are in a good state when all of these are true:
+
+- The editor opens your project without path errors.
+- `Ctrl+B` completes without script build errors.
+- `F5` enters Play mode and renders the scene.
+- The runtime starts in dev mode:
+
+```bash
+dotnet run --project src/FrinkyEngine.Runtime -- path/to/MyGame.fproject
+```
 
 ## Quick Editor Tour
 
 | Panel | Description |
 |-------|-------------|
-| **Viewport** | 3D scene rendering with transform gizmos (translate, rotate, scale) |
+| **Viewport** | 3D scene rendering with transform gizmos |
 | **Hierarchy** | Entity tree with drag-and-drop reordering and parenting |
 | **Inspector** | Component editing with attribute-driven reflection |
-| **Assets** | File browser with drag-and-drop for models, prefabs, and scenes |
+| **Assets** | File browser for models, prefabs, scenes, and scripts |
 | **Console** | Log stream viewer |
 | **Performance** | Frame time and rendering statistics |
 
-For a full editor walkthrough, see the [Editor Guide](editor-guide.md).
+## Next Steps
 
-## Build and Run Your Game
-
-1. Build game scripts from the editor: `File -> Build Scripts` (or `Ctrl+B`)
-2. Enter play mode: press `F5` or `Play` in the toolbar
-3. Run standalone: `dotnet run --project src/FrinkyEngine.Runtime -- path/to/MyGame.fproject`
-
-## What's Next
-
-- [Editor Guide](editor-guide.md) — master the editor tools and shortcuts
-- [Scripting](scripting.md) — write custom components
-- [Components Reference](components.md) — explore built-in components
-- [Physics](physics.md) — set up rigidbodies and character controllers
+- [Editor Guide](editor-guide.md) to learn the normal authoring loop.
+- [Scripting](scripting.md) to add your first gameplay component.
+- [Components](components.md) to choose common built-in setups.
+- [Prefabs](prefabs.md) to build reusable entities.

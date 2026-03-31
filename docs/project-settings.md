@@ -1,8 +1,15 @@
 # Project Settings
 
+Use this page when you need to change how a project is located, launched, or built.
+
+## The Two Files That Matter
+
+- `.fproject` tells the editor and runtime where your assets, startup scene, and game assembly live.
+- `project_settings.json` controls runtime defaults and build metadata.
+
 ## `.fproject`
 
-The project file is the entry point for both editor and runtime. It defines where assets, scenes, and game code are located.
+Typical file:
 
 ```json
 {
@@ -14,19 +21,36 @@ The project file is the entry point for both editor and runtime. It defines wher
 }
 ```
 
+### Change the startup scene
+
+Set `defaultScene` to the scene you want to open at startup.
+
+Important rule:
+
+- `defaultScene` is relative to `assetsPath`, not the repository root
+
+### Fix script build or hot-reload path issues
+
+Check these fields first:
+
+- `gameProject` should point to the gameplay `.csproj`
+- `gameAssembly` should point to the DLL that project actually outputs
+
+The editor script build uses `Debug` by default, so the usual path is under `bin/Debug`.
+
+### `.fproject` fields
+
 | Field | Description |
 |-------|-------------|
-| `projectName` | Display name for the project |
-| `defaultScene` | Startup scene path, relative to `assetsPath` |
-| `assetsPath` | Root folder for project assets |
-| `gameAssembly` | Path to the compiled game DLL |
-| `gameProject` | Path to the `.csproj` for script builds |
-
-`defaultScene` is relative to `assetsPath`. The editor script build uses `Debug`, so `gameAssembly` points to `bin/Debug`.
+| `projectName` | display name for the project |
+| `defaultScene` | startup scene path, relative to `assetsPath` |
+| `assetsPath` | root folder for project assets |
+| `gameAssembly` | compiled gameplay DLL |
+| `gameProject` | gameplay `.csproj` used for builds |
 
 ## `project_settings.json`
 
-Runtime and build settings. Created automatically in the project root.
+Typical file:
 
 ```json
 {
@@ -49,6 +73,16 @@ Runtime and build settings. Created automatically in the project root.
     "forwardPlusTileSize": 16,
     "forwardPlusMaxLights": 256,
     "forwardPlusMaxLightsPerTile": 64,
+    "physicsFixedTimestep": 0.016666668,
+    "physicsMaxSubstepsPerFrame": 4,
+    "physicsSolverVelocityIterations": 8,
+    "physicsSolverSubsteps": 1,
+    "physicsContactSpringFrequency": 30.0,
+    "physicsContactDampingRatio": 1.0,
+    "physicsMaximumRecoveryVelocity": 2.0,
+    "physicsDefaultFriction": 0.8,
+    "physicsDefaultRestitution": 0.0,
+    "physicsInterpolationEnabled": true,
     "audioMasterVolume": 1.0,
     "audioMusicVolume": 1.0,
     "audioSfxVolume": 1.0,
@@ -57,7 +91,8 @@ Runtime and build settings. Created automatically in the project root.
     "audioAmbientVolume": 1.0,
     "audioMaxVoices": 128,
     "audioDopplerScale": 1.0,
-    "audioEnableVoiceStealing": true
+    "audioEnableVoiceStealing": true,
+    "screenPercentage": 100
   },
   "build": {
     "outputName": "MyGame",
@@ -66,54 +101,131 @@ Runtime and build settings. Created automatically in the project root.
 }
 ```
 
-### Project Section
+## Common Changes
+
+### Change the game window defaults
+
+Edit:
+
+- `windowTitle`
+- `windowWidth`
+- `windowHeight`
+- `resizable`
+- `fullscreen`
+- `startMaximized`
+
+### Override the startup scene at runtime
+
+Use `startupSceneOverride` when you want to force a different scene without changing the main `.fproject` startup scene.
+
+### Tune rendering defaults
+
+Most projects only touch these if they have a specific need:
+
+- `forwardPlusTileSize`
+- `forwardPlusMaxLights`
+- `forwardPlusMaxLightsPerTile`
+- `screenPercentage`
+
+### Tune physics defaults
+
+These control the built-in runtime simulation settings:
+
+- `physicsFixedTimestep`
+- `physicsMaxSubstepsPerFrame`
+- `physicsSolverVelocityIterations`
+- `physicsSolverSubsteps`
+- `physicsContactSpringFrequency`
+- `physicsContactDampingRatio`
+- `physicsMaximumRecoveryVelocity`
+- `physicsDefaultFriction`
+- `physicsDefaultRestitution`
+- `physicsInterpolationEnabled`
+
+### Tune audio defaults
+
+Use these to set the initial mix and runtime limits:
+
+- `audioMasterVolume`
+- `audioMusicVolume`
+- `audioSfxVolume`
+- `audioUiVolume`
+- `audioVoiceVolume`
+- `audioAmbientVolume`
+- `audioMaxVoices`
+- `audioDopplerScale`
+- `audioEnableVoiceStealing`
+
+### Control build output naming
+
+Use:
+
+- `outputName` for the exported executable and archive base name
+- `buildVersion` for the embedded build version
+
+## Field Reference
+
+### Project section
 
 | Field | Description |
 |-------|-------------|
-| `version` | Project version string |
-| `author` | Author name |
-| `company` | Company name |
-| `description` | Project description |
+| `version` | project version string |
+| `author` | author name |
+| `company` | company name |
+| `description` | project description |
 
-### Runtime Section
+### Runtime section
 
 | Field | Default | Description |
 |-------|---------|-------------|
-| `targetFps` | 120 | Target frame rate (`0` for uncapped; valid range: 30–500) |
-| `vSync` | true | Enable vertical sync |
-| `windowTitle` | "MyGame" | Window title |
-| `windowWidth` | 1280 | Initial window width |
-| `windowHeight` | 720 | Initial window height |
-| `resizable` | true | Allow window resizing |
-| `fullscreen` | false | Start in fullscreen |
-| `startMaximized` | false | Start maximized |
-| `startupSceneOverride` | "" | Override the default scene at startup |
-| `forwardPlusTileSize` | 16 | Lighting tile size in pixels |
-| `forwardPlusMaxLights` | 256 | Maximum total lights |
-| `forwardPlusMaxLightsPerTile` | 64 | Maximum lights per tile |
-| `audioMasterVolume` | 1.0 | Master bus volume |
-| `audioMusicVolume` | 1.0 | Music bus volume |
+| `targetFps` | 120 | target frame rate (`0` for uncapped) |
+| `vSync` | true | enable vertical sync |
+| `windowTitle` | project name | initial window title |
+| `windowWidth` | 1280 | initial window width |
+| `windowHeight` | 720 | initial window height |
+| `resizable` | true | allow window resizing |
+| `fullscreen` | false | start in fullscreen |
+| `startMaximized` | false | start maximized |
+| `startupSceneOverride` | `""` | override startup scene |
+| `forwardPlusTileSize` | 16 | lighting tile size in pixels |
+| `forwardPlusMaxLights` | 256 | maximum total lights |
+| `forwardPlusMaxLightsPerTile` | 64 | maximum lights per tile |
+| `physicsFixedTimestep` | `1/60` | physics fixed timestep |
+| `physicsMaxSubstepsPerFrame` | 4 | maximum physics catch-up steps per frame |
+| `physicsSolverVelocityIterations` | 8 | solver velocity iterations |
+| `physicsSolverSubsteps` | 1 | solver substeps |
+| `physicsContactSpringFrequency` | 30.0 | contact spring frequency |
+| `physicsContactDampingRatio` | 1.0 | contact damping ratio |
+| `physicsMaximumRecoveryVelocity` | 2.0 | max penetration recovery velocity |
+| `physicsDefaultFriction` | 0.8 | default friction |
+| `physicsDefaultRestitution` | 0.0 | default restitution |
+| `physicsInterpolationEnabled` | true | rigidbody interpolation toggle |
+| `audioMasterVolume` | 1.0 | master bus volume |
+| `audioMusicVolume` | 1.0 | music bus volume |
 | `audioSfxVolume` | 1.0 | SFX bus volume |
 | `audioUiVolume` | 1.0 | UI bus volume |
-| `audioVoiceVolume` | 1.0 | Voice bus volume |
-| `audioAmbientVolume` | 1.0 | Ambient bus volume |
-| `audioMaxVoices` | 128 | Maximum concurrent audio voices |
-| `audioDopplerScale` | 1.0 | Doppler effect scale |
-| `audioEnableVoiceStealing` | true | Allow voice stealing when at max voices |
+| `audioVoiceVolume` | 1.0 | voice bus volume |
+| `audioAmbientVolume` | 1.0 | ambient bus volume |
+| `audioMaxVoices` | 128 | maximum concurrent voices |
+| `audioDopplerScale` | 1.0 | doppler effect scale |
+| `audioEnableVoiceStealing` | true | allow voice stealing at max voices |
+| `screenPercentage` | 100 | internal render scale percentage |
 
-### Build Section
+### Build section
 
 | Field | Default | Description |
 |-------|---------|-------------|
-| `outputName` | "MyGame" | Name for the exported executable |
-| `buildVersion` | "0.1.0" | Version embedded in the exported build |
+| `outputName` | project name | exported executable and archive name |
+| `buildVersion` | `"0.1.0"` | embedded build version |
 
 ## Editor Settings
 
-### `.frinky/editor_settings.json`
+Per-project editor files are stored under `.frinky/`.
 
-Per-project editor preferences. Auto-created when a project opens.
+- `.frinky/editor_settings.json` stores editor preferences.
+- `.frinky/keybinds.json` stores keybind overrides.
 
-### `.frinky/keybinds.json`
+## See Also
 
-Per-project keybind overrides. Auto-created with defaults when a project opens. See [Editor Guide](editor-guide.md) for the default keyboard shortcuts.
+- [Exporting & Packaging](exporting.md) for shipping builds
+- [Getting Started](getting-started.md) for project creation and runtime launch

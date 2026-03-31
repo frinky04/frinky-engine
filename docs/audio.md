@@ -1,112 +1,104 @@
 # Audio
 
-The audio system supports UE-style static gameplay helpers plus ECS components for 2D/3D sound.
+Use this guide when you want to play UI sounds, music, ambient loops, or spatialized world audio.
 
-## Static API
+## Use This When
 
-Play sounds from any component without needing a reference to an audio source:
+Use the audio system when you need:
+
+- one-shot sound playback from code
+- persistent sound emitters attached to entities
+- 3D positional audio
+- bus-based volume control for music, SFX, UI, voice, and ambient audio
+
+## Minimal One-Shot Example
 
 ```csharp
-// 2D sound (not spatialized)
 Audio.PlaySound2D("Sounds/click.wav");
-
-// 3D sound at a world position
-Audio.PlaySoundAtLocation("Sounds/explosion.wav", worldPosition);
-
-// 3D sound attached to an entity (follows it)
-Audio.SpawnSoundAttached("Sounds/engine.wav", entity);
-
-// With parameters
-Audio.PlaySound2D("Sounds/music.wav", new AudioPlayParams
-{
-    Bus = AudioBus.Music,
-    Volume = 0.8f,
-    Pitch = 1.0f,
-    Looping = true
-});
-
-// Stop a playing sound
-Audio.Stop(handle, fadeOutSeconds: 0.5f);
 ```
 
-### Volume Control
+Use this for UI sounds, menu feedback, or simple non-spatial one-shots.
+
+## Minimal 3D Example
 
 ```csharp
-Audio.SetBusVolume(AudioBus.Music, 0.5f);
-Audio.SetBusMuted(AudioBus.Sfx, true);
+Audio.PlaySoundAtLocation("Sounds/explosion.wav", worldPosition);
 ```
 
-## Components
+Use this when the sound should come from a world position instead of the listener.
 
-### AudioSourceComponent
+## Persistent Audio Sources
 
-Attach to an entity for persistent sound emitters:
+Attach `AudioSourceComponent` to an entity when the sound should belong to that entity.
 
-| Property | Default | Description |
-|----------|---------|-------------|
-| `SoundPath` | — | Path to the audio file |
-| `PlayOnStart` | false | Auto-play when the scene starts |
-| `Spatialized` | false | Enable 3D positioning |
-| `Looping` | false | Loop playback |
-| `Bus` | Sfx | Mixer bus routing |
-| `Volume` | 1.0 | Volume multiplier |
-| `Pitch` | 1.0 | Pitch multiplier |
-| `Attenuation` | — | Distance attenuation settings |
+Important properties:
 
-### AudioListenerComponent
+| Property | Use it for |
+|----------|------------|
+| `SoundPath` | choose the source asset |
+| `PlayOnStart` | start automatically with the scene |
+| `Spatialized` | switch between 2D and 3D playback |
+| `Looping` | keep the sound running |
+| `Bus` | route to the correct mixer bus |
+| `Volume` / `Pitch` | local playback adjustment |
+| `AttenuationSettings` | 3D falloff behavior |
 
-Marks the entity as the active audio listener for 3D spatialization:
+## 3D Audio Listener
 
-| Property | Default | Description |
-|----------|---------|-------------|
-| `IsPrimary` | true | Whether this is the active listener |
-| `MasterVolumeScale` | 1.0 | Global volume multiplier |
+Add `AudioListenerComponent` to the entity that should act as the listener.
 
-If no `AudioListenerComponent` exists in the scene, the main camera is used as the fallback listener.
+If no explicit listener exists, the main camera is used as a fallback listener.
 
 ## Mixer Buses
 
-Audio is routed through mixer buses for category-based volume control:
+Use buses to control categories of audio:
 
 | Bus | Typical Use |
 |-----|-------------|
-| `Master` | Overall volume (all other buses feed into this) |
-| `Music` | Background music |
-| `Sfx` | Sound effects |
-| `Ui` | Menu and UI sounds |
-| `Voice` | Dialogue and voice lines |
-| `Ambient` | Environmental audio |
+| `Master` | overall output |
+| `Music` | background music |
+| `Sfx` | gameplay sound effects |
+| `Ui` | menu and interface sounds |
+| `Voice` | dialogue |
+| `Ambient` | environmental audio |
 
-Bus volumes can be configured in `project_settings.json` (see [Project Settings](project-settings.md)) or at runtime via `Audio.SetBusVolume()`.
+Runtime volume control example:
+
+```csharp
+Audio.SetBusVolume(AudioBusId.Music, 0.5f);
+Audio.SetBusMuted(AudioBusId.Sfx, true);
+```
 
 ## AudioPlayParams
 
-Optional parameters for static API calls:
+Use `AudioPlayParams` when the default one-shot behavior is not enough.
 
-| Property | Default | Description |
-|----------|---------|-------------|
-| `Bus` | Sfx | Mixer bus |
-| `Volume` | 1.0 | Volume multiplier |
-| `Pitch` | 1.0 | Pitch multiplier |
-| `Looping` | false | Loop playback |
-| `Attenuation` | — | Distance attenuation override |
+Most useful options:
 
-## AudioAttenuationSettings
+- `Bus`
+- `Volume`
+- `Pitch`
+- `Looping`
+- `AttenuationOverride`
 
-Controls how 3D sounds fall off with distance:
+Example:
 
-| Property | Description |
-|----------|-------------|
-| `MinDistance` | Distance at which attenuation begins |
-| `MaxDistance` | Distance at which the sound is silent |
-| `RolloffFactor` | How quickly volume decreases with distance |
+```csharp
+Audio.PlaySound2D("Sounds/music.wav", new AudioPlayParams
+{
+    Bus = AudioBusId.Music,
+    Volume = 0.8f,
+    Looping = true
+});
+```
 
-## Runtime Notes
+## Notes
 
-- Missing audio assets fail safe with warnings and do not crash the runtime
-- `AudioSourceComponent` can auto-play in `Start` via `PlayOnStart = true`
-- The listener fallback to main camera means 3D audio works even without an explicit `AudioListenerComponent`
+- Missing audio assets fail safely with warnings instead of crashing the runtime.
+- 3D sounds need either an `AudioListenerComponent` or a main camera fallback.
+- Bus defaults and voice limits are configured in `project_settings.json`.
 
 ## See Also
 
-- [Audio Roadmap](roadmaps/audio_roadmap.md) — planned audio features
+- [Project Settings](project-settings.md) for runtime audio defaults
+- [Choosing Components](components.md) for audio source and listener setup

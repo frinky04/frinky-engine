@@ -1,71 +1,113 @@
 # Exporting & Packaging
 
-FrinkyEngine supports two runtime modes and provides tools for packaging games for distribution.
+Use this guide when you want to run the game outside the editor or prepare a build for distribution.
+
+## Use This When
+
+Come here for:
+
+- running the runtime in dev mode
+- creating a packaged exported build
+- validating the files needed to ship the game
 
 ## Runtime Modes
 
 ### Dev Mode (`.fproject`)
 
-Use when iterating from source or build outputs.
+Use this while iterating on a project from source or local build outputs.
 
 ```bash
 dotnet run --project src/FrinkyEngine.Runtime -- path/to/MyGame.fproject
 ```
 
-- Loads `.fproject` and resolves `assetsPath`, `defaultScene`, and `gameAssembly`
-- Applies runtime settings from `project_settings.json`
-- Runs the scene loop from the scene's main camera
+This mode:
+
+- loads the `.fproject`
+- resolves `assetsPath`, `defaultScene`, and `gameAssembly`
+- applies runtime settings from `project_settings.json`
 
 ### Exported Mode (`.fasset`)
 
-Use for packaged game distribution.
+Use this for packaged distribution.
 
-- Runtime looks for a `.fasset` file next to the executable
-- Extracts the archive to a temp folder, loads `manifest.json`, assets, shaders, and game assembly
-- Runs the startup scene from the archive
-- Cleans up on exit
+The runtime looks for a `.fasset` file next to the executable, extracts it to a temp folder, loads assets and shaders, then runs the packaged startup scene.
 
-If no `.fproject` argument and no `.fasset` is found, the runtime prints usage help.
+## Export from the Editor
 
-## Editor Export
+Use `File -> Export Game...` or `Ctrl+Shift+E`.
 
-Use `File -> Export Game...` (`Ctrl+Shift+E`) from the editor:
+The export flow:
 
-1. Builds game scripts in `Release`
-2. Publishes runtime (`win-x64`, `FrinkyExport=true` for no console window)
-3. Packs assets, shaders, manifest, and game assembly into `.fasset`
-4. Outputs `<OutputName>.exe` + `<OutputName>.fasset`
+1. builds game scripts in `Release`
+2. publishes the runtime
+3. packs assets, shaders, manifest, and game assembly into `.fasset`
+4. outputs `<OutputName>.exe` and `<OutputName>.fasset`
 
-`OutputName` and `BuildVersion` come from `project_settings.json` build settings (see [Project Settings](project-settings.md)).
+`OutputName` and `BuildVersion` come from `project_settings.json`.
 
-## Script Packaging (`package-game.bat`)
+## Prepare an Export Safely
+
+Before exporting:
+
+1. build scripts successfully
+2. confirm the correct startup scene opens in the editor
+3. confirm `project_settings.json` has the output name you want
+4. run the project once in play mode
+
+## Validate the Exported Build
+
+After exporting, check all of these:
+
+- the executable exists
+- a `.fasset` archive exists beside it
+- the exported runtime starts
+- the startup scene loads
+- assets and shaders render correctly
+- audio plays
+
+If the runtime fails immediately, first make sure there is a `.fasset` file beside the executable. The exporter writes matching names by convention, but the runtime looks for the first `.fasset` next to the executable rather than enforcing a name match.
+
+## Scripted Packaging
+
+### `package-game.bat`
 
 ```powershell
 .\package-game.bat path\to\Game.fproject [outDir] [rid]
 ```
 
-Builds the game assembly, publishes the runtime (framework-dependent), copies project files, and creates a `Play.bat` launcher. Default RID: `win-x64`.
+Use this when you want a scripted packaging path outside the editor.
 
-## Local Release (`release-local.bat`)
+What it currently copies:
+
+- the runtime publish output
+- the `.fproject`
+- the game assembly
+- the `Assets/` folder
+- the `Scenes/` folder if one exists
+
+It does not currently copy `project_settings.json`, so packaged dev-mode runs from this script can fall back to default runtime settings.
+
+### `release-local.bat`
 
 ```powershell
 .\release-local.bat v0.1.0
 ```
 
-Validates the version tag, builds the solution with warnings-as-errors, publishes editor and runtime, packs the template NuGet, and creates zip artifacts in `artifacts/release/`. Supports `--patch` for auto-incrementing the version from git tags.
+Use this when you want local release artifacts and versioned zip outputs from the repository itself.
 
 ## Runtime Overlay Controls
 
-Available in both standalone runtime and editor Play/Simulate mode:
+Available in both standalone runtime and editor play/simulate mode:
 
-- **F3** — cycle stats overlay: None → FPS + MS → Advanced Stats → Most Verbose Stats
-- **\`** (Grave) — toggle developer console
-  - `help` — list registered commands and cvars
-  - `Tab` — cycle suggestions, `Enter` — execute
-  - `Up/Down` — navigate command history
+- **F3** cycles stats overlay modes
+- **\`** toggles the developer console
 
-### Console CVars
+Common console use:
 
-| CVar | Values | Description |
-|------|--------|-------------|
-| `r_postprocess` | `0` / `1` | Toggle post-processing |
+- `help` to list commands and CVars
+- `r_postprocess 0` or `1` to toggle post-processing
+
+## See Also
+
+- [Project Settings](project-settings.md) for build and runtime configuration
+- [Getting Started](getting-started.md) for dev-mode runtime launch

@@ -157,7 +157,7 @@ Core guides:
 - [Getting Started](https://frinky04.github.io/FrinkyEngine/getting-started)
 - [Editor Guide](https://frinky04.github.io/FrinkyEngine/editor-guide)
 - [Scripting](https://frinky04.github.io/FrinkyEngine/scripting)
-- [Components Reference](https://frinky04.github.io/FrinkyEngine/components)
+- [Choosing Components](https://frinky04.github.io/FrinkyEngine/components)
 - [Physics](https://frinky04.github.io/FrinkyEngine/physics)
 - [Audio](https://frinky04.github.io/FrinkyEngine/audio)
 - [Rendering & Post-Processing](https://frinky04.github.io/FrinkyEngine/rendering)
@@ -165,7 +165,7 @@ Core guides:
 - [Prefabs & Entity References](https://frinky04.github.io/FrinkyEngine/prefabs)
 - [Exporting & Packaging](https://frinky04.github.io/FrinkyEngine/exporting)
 - [Project Settings](https://frinky04.github.io/FrinkyEngine/project-settings)
-- [API Reference](https://frinky04.github.io/FrinkyEngine/api/index) (auto-generated)
+- [Generated API Reference](https://frinky04.github.io/FrinkyEngine/api/index) (auto-generated)
 
 ## Repository Layout
 

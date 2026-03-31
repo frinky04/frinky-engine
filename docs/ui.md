@@ -1,23 +1,25 @@
 # Game UI
 
-FrinkyEngine provides two UI systems for game scripts:
+FrinkyEngine currently exposes two UI paths for game code:
 
-- **CanvasUI** (`FrinkyEngine.Core.CanvasUI`) — retained-mode panels with flexbox layout. Recommended for new game UI.
-- **Immediate-mode UI** (`FrinkyEngine.Core.UI`) — the existing ImGui wrapper. Still functional; will eventually be scoped to editor-only usage.
+- **CanvasUI** (`FrinkyEngine.Core.CanvasUI`) is the recommended retained-mode UI system for new work.
+- **Immediate-mode UI** (`FrinkyEngine.Core.UI`) is the older ImGui wrapper and is best treated as legacy gameplay UI.
 
-Both systems can be used in the same project.
+## Use This When
 
----
+Choose **CanvasUI** when you want:
 
-## CanvasUI (Retained-Mode)
+- persistent HUDs and menus
+- panel trees and reusable UI widgets
+- layout driven by flexbox-style rules
+- styling with classes and CSS-like selectors
 
-CanvasUI lets you build UI by creating panels, setting styles, and responding to events. Layout follows CSS flexbox rules — if you've used CSS, the properties will feel familiar.
+Use the immediate-mode wrapper only if you already have gameplay UI built on it or you need that style of API for a quick internal tool.
 
-### Getting Started
-
-Create panels in `Start()` and update them in `Update()`:
+## Minimal CanvasUI Example
 
 ```csharp
+using Raylib_cs;
 using FrinkyEngine.Core.CanvasUI;
 using FrinkyEngine.Core.CanvasUI.Panels;
 using FrinkyEngine.Core.CanvasUI.Styles;
@@ -25,7 +27,7 @@ using FrinkyEngine.Core.ECS;
 
 public class HudComponent : Component
 {
-    private Label _healthLabel;
+    private Label _healthLabel = null!;
 
     public override void Start()
     {
@@ -39,8 +41,8 @@ public class HudComponent : Component
         _healthLabel = hud.AddChild<Label>(l =>
         {
             l.Text = "Health: 100";
-            l.Style.Color = new Raylib_cs.Color(0, 255, 0, 255);
             l.Style.FontSize = 20f;
+            l.Style.Color = new Color(0, 255, 0, 255);
         });
 
         hud.AddChild<Button>(b =>
@@ -60,597 +62,71 @@ public class HudComponent : Component
 }
 ```
 
-### Panel
+What success looks like:
 
-`Panel` is the base class for all CanvasUI elements. Use `AddChild<T>()` to build a tree of panels from `CanvasUI.RootPanel`.
+- the label appears on screen
+- the button is clickable
+- the label text updates at runtime
 
-#### Child Management
+## Common CanvasUI Workflow
 
-| Method | Description |
-|--------|-------------|
-| `AddChild<T>(configure?)` | Create and add a typed child panel with optional initializer |
-| `AddChild(panel)` | Add an existing panel (re-parents if it already has a parent) |
-| `RemoveChild(panel)` | Remove a child from this panel |
-| `Delete()` | Remove this panel from its parent and delete all children |
-| `DeleteChildren()` | Delete all children recursively |
+1. Create panels from `CanvasUI.RootPanel`.
+2. Use `Panel` as the base container type.
+3. Add built-in child panels such as `Label`, `Button`, `Checkbox`, `Slider`, `ProgressBar`, `TextEntry`, `ScrollPanel`, and `Image`.
+4. Set simple layout inline first.
+5. Move repeated styling into CSS-like rules once the structure works.
 
-#### Events
+## Styling
 
-| Event | Description |
-|-------|-------------|
-| `OnClick` | Mouse click (down + up on same panel) |
-| `OnMouseOver` | Mouse entered panel bounds |
-| `OnMouseOut` | Mouse left panel bounds |
-| `OnMouseDown` | Mouse button pressed on panel |
-| `OnMouseUp` | Mouse button released on panel |
-| `OnMouseWheel` | Mouse wheel scrolled over this panel (receives `MouseWheelEvent` with `Delta` + `Handled`; bubbles to ancestors until handled) |
-| `OnFocus` | Panel received keyboard focus |
-| `OnBlur` | Panel lost keyboard focus |
-| `OnKeyDown` | Key pressed while panel has focus (receives `KeyboardEvent` with `Key`) |
-| `OnKeyPress` | Text character typed while panel has focus (receives `KeyboardEvent` with `Character`) |
+CanvasUI supports CSS-like styling through style sheets and selector matching.
 
-#### Classes
+Typical workflow:
 
-Add string class names to a panel with `AddClass()`, `RemoveClass()`, `ToggleClass()`, and check with `HasClass()`. Classes are used for CSS selector matching (see [CSS Styling](#css-styling) below).
+1. Give panels classes with `AddClass()`.
+2. Load style sheets with `CanvasUI.LoadStyleSheet(css)`.
+3. Keep one-off overrides inline on the panel itself.
 
-#### Custom Panels
-
-Subclass `Panel` to create reusable UI elements. Override these methods:
-
-| Method | Description |
-|--------|-------------|
-| `OnCreated()` | Called after the panel is added to the tree — set up children and defaults here |
-| `OnDeleted()` | Called when the panel is removed — clean up subscriptions here |
-| `Tick(dt)` | Called every frame — use for animations or per-frame updates |
-| `RenderContent(box, style, alpha)` | Override to draw custom content (text, images, shapes) |
-
-Set `AcceptsFocus = true` in `OnCreated()` if your panel needs keyboard focus.
-
-### Built-in Panels
-
-#### Label
-
-Displays text. Set the `Text` property.
-
-```csharp
-var label = parent.AddChild<Label>(l => l.Text = "Score: 0");
-label.Text = "Score: 100"; // update later
-```
-
-#### Button
-
-Clickable panel with centered text. Accepts focus by default.
-
-```csharp
-var btn = parent.AddChild<Button>(b => b.Text = "Start Game");
-btn.OnClick += _ => StartGame();
-```
-
-Keyboard support: press Enter or Space while focused to trigger `OnClick`.
-
-#### ProgressBar
-
-Horizontal bar showing a 0–1 value. Draws a track and a fill — no children needed.
-
-| Property | Default | Description |
-|----------|---------|-------------|
-| `Value` | `0` | Fill amount, clamped 0–1 |
-| `TrackColor` | dark gray | Background track color (nullable — set `null` to use default) |
-| `FillColor` | green | Fill color (nullable) |
-
-```csharp
-var hp = parent.AddChild<ProgressBar>(p =>
-{
-    p.AddClass("health-bar");
-    p.Value = 0.75f;
-    p.FillColor = new Color(74, 222, 128, 255);
-});
-
-// Update each frame
-hp.Value = currentHealth / maxHealth;
-```
-
-Style the size with CSS or inline:
+Example:
 
 ```css
-ProgressBar.health-bar { width: 200px; height: 8px; border-radius: 4px; }
-```
-
-#### Checkbox
-
-Toggle with an optional text label. Accepts focus by default. Toggles the `:checked` pseudo-class.
-
-| Property | Default | Description |
-|----------|---------|-------------|
-| `Checked` | `false` | Current toggle state |
-| `Text` | `""` | Label text displayed next to the checkbox |
-
-| Event | Description |
-|-------|-------------|
-| `OnChanged` | Fires with the new `bool` state when toggled |
-
-```csharp
-var mute = parent.AddChild<Checkbox>(c =>
-{
-    c.Text = "Mute Audio";
-    c.Checked = false;
-});
-mute.OnChanged += isMuted => AudioManager.SetMuted(isMuted);
-```
-
-Keyboard support: press Enter or Space while focused to toggle.
-
-Style the checked state with CSS:
-
-```css
-Checkbox { color: #aaa; font-size: 16px; }
-Checkbox:checked { color: #4ade80; }
-```
-
-#### Slider
-
-Horizontal range slider with drag and keyboard arrow support. Accepts focus by default.
-
-| Property | Default | Description |
-|----------|---------|-------------|
-| `Value` | `0` | Normalized position, clamped 0–1 |
-| `Min` | `0` | Minimum of the mapped range |
-| `Max` | `1` | Maximum of the mapped range |
-| `Step` | `0.05` | Increment for keyboard arrows |
-| `MappedValue` | (read-only) | `Min + Value * (Max - Min)` |
-
-| Event | Description |
-|-------|-------------|
-| `OnChanged` | Fires with the mapped value on drag or keyboard change |
-
-```csharp
-var volume = parent.AddChild<Slider>(s =>
-{
-    s.Min = 0f;
-    s.Max = 100f;
-    s.Value = 0.8f; // 80%
-});
-volume.OnChanged += v => AudioManager.SetVolume(v);
-```
-
-Drag the thumb or use Left/Right arrow keys when focused.
-
-#### TextEntry
-
-Single-line text input with cursor, selection, clipboard, and placeholder support. Accepts focus by default.
-
-| Property | Default | Description |
-|----------|---------|-------------|
-| `Text` | `""` | Current text content |
-| `Placeholder` | `""` | Gray hint text shown when empty |
-| `MaxLength` | `null` | Optional character limit |
-| `CursorPos` | `0` | Current cursor position |
-
-| Event | Description |
-|-------|-------------|
-| `OnTextChanged` | Fires with the new text on every edit |
-| `OnSubmit` | Fires with the text when Enter is pressed |
-
-```csharp
-var nameField = parent.AddChild<TextEntry>(t =>
-{
-    t.Placeholder = "Enter player name...";
-    t.MaxLength = 20;
-});
-nameField.OnSubmit += name => SetPlayerName(name);
-```
-
-Keyboard support: typing, Backspace, Delete, Home, End, arrow keys (with Shift for selection), Ctrl+A/C/V/X for clipboard, Enter to submit.
-
-#### ScrollPanel
-
-Scrollable container. Children that extend beyond the panel's height are clipped and can be scrolled into view with the mouse wheel. A subtle scrollbar indicator appears when content overflows.
-
-| Property | Default | Description |
-|----------|---------|-------------|
-| `ScrollOffsetY` | `0` | Current vertical scroll position in pixels |
-| `ScrollSpeed` | `30` | Pixels scrolled per mouse wheel tick |
-
-```csharp
-var scroll = parent.AddChild<ScrollPanel>(s =>
-{
-    s.Style.Height = 300;
-});
-
-// Add more content than fits
-for (int i = 0; i < 20; i++)
-    scroll.AddChild<Label>(l => l.Text = $"Item {i}");
-```
-
-`ScrollPanel` automatically sets `Overflow = Hidden` and clamps the scroll offset to the content bounds. It marks wheel events as handled only when it actually scrolls, so nested scroll panels hand off wheel input naturally.
-
-#### Image
-
-Displays a Raylib `Texture2D`. Reports texture dimensions as intrinsic size for layout.
-
-| Property | Default | Description |
-|----------|---------|-------------|
-| `Texture` | `null` | The texture to display |
-| `Tint` | white | Color tint applied to the texture |
-
-```csharp
-var icon = parent.AddChild<Image>(img =>
-{
-    img.Texture = myTexture;
-    img.Style.Width = 64;
-    img.Style.Height = 64;
-});
-```
-
-If no explicit size is set, the panel sizes itself to the texture dimensions.
-
-### Styling
-
-Set properties on `panel.Style` to control layout and appearance. All style properties are optional — unset properties use sensible defaults (e.g., column direction, stretch alignment, white text, 16px font).
-
-#### Layout Properties
-
-| Property | Default | Description |
-|----------|---------|-------------|
-| `FlexDirection` | `Column` | Main axis direction (`Row`, `Column`, `RowReverse`, `ColumnReverse`) |
-| `JustifyContent` | `FlexStart` | Main axis alignment |
-| `AlignItems` | `Stretch` | Cross axis alignment |
-| `AlignSelf` | `Auto` | Override parent's `AlignItems` for this panel |
-| `Display` | `Flex` | `Flex` or `None` (hidden) |
-| `Position` | `Relative` | `Relative` or `Absolute` |
-| `Overflow` | `Visible` | `Visible`, `Hidden`, or `Scroll` |
-| `Width` / `Height` | `Auto` | Panel dimensions |
-| `MinWidth` / `MinHeight` | `Auto` | Minimum dimensions |
-| `MaxWidth` / `MaxHeight` | `Auto` | Maximum dimensions |
-| `FlexGrow` | `0` | How much to grow to fill available space |
-| `FlexShrink` | `1` | How much to shrink when space is tight |
-| `FlexBasis` | `Auto` | Initial size before flex grow/shrink |
-| `Gap` | `0` | Space between children (pixels) |
-| `Padding` | `0` | Inner spacing |
-| `Margin` | `0` | Outer spacing |
-
-#### Visual Properties
-
-| Property | Default | Description |
-|----------|---------|-------------|
-| `BackgroundColor` | transparent | Panel background |
-| `Color` | white | Text / foreground color |
-| `BorderColor` | transparent | Border color |
-| `BorderWidth` | `0` | Border thickness in pixels |
-| `BorderRadius` | `0` | Corner radius in pixels |
-| `FontSize` | `16` | Text size in pixels |
-| `FontFamily` | `null` | Name of a registered font (see [Custom Fonts](#custom-fonts)) |
-| `Opacity` | `1` | Overall opacity multiplier (0-1) applied to this panel and all descendants |
-
-#### Length Values
-
-Dimensions accept `Length` values:
-
-```csharp
-p.Style.Width = 200;                    // pixels (implicit from float/int)
-p.Style.Width = Length.Px(200);          // pixels (explicit)
-p.Style.Width = Length.Pct(50);          // 50% of parent
-p.Style.Width = Length.Auto;             // auto-size
-```
-
-#### Edges (Padding / Margin)
-
-```csharp
-p.Style.Padding = new Edges(12);                // all sides
-p.Style.Padding = new Edges(8, 16);             // vertical, horizontal
-p.Style.Padding = new Edges(4, 8, 12, 16);      // top, right, bottom, left
-```
-
-### CSS Styling
-
-Style panels with CSS strings instead of (or alongside) inline C# style properties. Load one or more stylesheets, and they apply automatically to all panels via selector matching.
-
-```csharp
-CanvasUI.LoadStyleSheet(@"
-    .hud { flex-direction: row; padding: 12px; gap: 8px; }
-    Label { color: white; font-size: 20px; }
-    Button { background-color: #3366cc; padding: 8px 16px; border-radius: 4px; }
-    Button:hover { background-color: #4477dd; }
-");
-```
-
-Inline `panel.Style` properties always win over CSS rules — use CSS for defaults and class-based theming, and inline styles for one-off overrides.
-
-#### Inheritance
-
-The properties `color`, `font-size`, `font-family`, and `text-align` are inherited from parent panels, matching standard CSS behavior. If a child panel has no explicit value for these properties (neither from CSS rules nor inline styles), it uses its parent's computed value. Explicit rules on a child always override inherited values.
-
-#### Selectors
-
-| Selector | Example | Matches |
-|----------|---------|---------|
-| Type | `Label` | All `Label` panels |
-| Class | `.hud` | Panels with `AddClass("hud")` |
-| Pseudo-class | `:hover`, `:active`, `:focus`, `:disabled`, `:checked` | Panels in that interaction state |
-| Universal | `*` | All panels |
-| Descendant | `.hud Label` | Labels anywhere inside a `.hud` panel |
-| Child | `.hud > Label` | Labels that are direct children of `.hud` |
-| Combined | `Button.primary:hover` | Hovered buttons with class `primary` |
-
-Multiple selectors can share a rule with commas: `Label, Button { color: white; }`
-
-#### Supported Properties
-
-All properties from the [Layout](#layout-properties) and [Visual](#visual-properties) tables are supported in CSS using kebab-case names:
-
-- **Layout**: `flex-direction`, `justify-content`, `align-items`, `align-self`, `display`, `position`, `overflow`, `width`, `height`, `min-width`, `min-height`, `max-width`, `max-height`, `flex-grow`, `flex-shrink`, `flex-basis`, `gap`, `top`, `right`, `bottom`, `left`
-- **Spacing**: `padding`, `padding-top`, `padding-right`, `padding-bottom`, `padding-left`, `margin` (and sides)
-- **Visual**: `background-color`, `color`, `border-color`, `border-width`, `border-radius`, `font-size`, `font-family`, `opacity`
-- **Shorthand**: `border` (e.g. `border: 2px #ff0000`)
-
-#### Color Values
-
-Colors can be specified as:
-
-```css
-color: white;               /* named color */
-color: #ff0000;             /* hex RGB */
-color: #ff000080;           /* hex RGBA */
-color: #f00;                /* short hex */
-color: rgb(255, 0, 0);      /* rgb() function */
-color: rgba(255, 0, 0, 0.5); /* rgba() with 0-1 alpha */
-```
-
-#### Length Values
-
-```css
-width: 200px;   /* pixels */
-width: 50%;     /* percentage of parent */
-width: auto;    /* auto-size */
-width: 200;     /* unitless = pixels */
-```
-
-#### Specificity
-
-When multiple rules match the same panel, more specific selectors win. Specificity is calculated as:
-
-1. Number of class selectors + pseudo-class selectors
-2. Number of type selectors
-
-Higher specificity overrides lower. Equal specificity uses source order (later rules win). Inline `panel.Style` always takes highest priority.
-
-#### Managing Stylesheets
-
-| Method | Description |
-|--------|-------------|
-| `CanvasUI.LoadStyleSheet(css)` | Parse and add CSS rules (can call multiple times to layer stylesheets) |
-| `CanvasUI.LoadStyleSheetFromAsset(path)` | Load and parse a stylesheet from an asset file (supports hot reload when enabled) |
-| `CanvasUI.ClearStyleSheets()` | Remove all loaded CSS rules |
-
-### Custom Fonts
-
-By default all panels use the built-in JetBrains Mono font. Register additional `.ttf` fonts by name at startup, then reference them from CSS or inline styles.
-
-```csharp
-// Register fonts (typically in your game's initialization)
-CanvasUI.RegisterFont("inter", "EngineContent/Fonts/Inter-Regular.ttf");
-CanvasUI.RegisterFont("heading", "EngineContent/Fonts/Montserrat-Bold.ttf");
-```
-
-Use the font name in CSS with `font-family`. Quotes are optional — unquoted names work and are easier inside C# verbatim strings:
-
-```css
-Label { font-family: inter; }
-.title { font-family: heading; font-size: 32px; }
-```
-
-Or set it inline:
-
-```csharp
-label.Style.FontFamily = "inter";
-```
-
-Panels with no `font-family` set continue using the default font. If a name doesn't match any registered font, the default font is used as a fallback.
-
-| Method | Description |
-|--------|-------------|
-| `CanvasUI.RegisterFont(name, path)` | Register a named `.ttf` font for use in `font-family` |
-
-Fonts can also be loaded through the asset manager with `AssetManager.Instance.LoadFont(path)`, which returns a Raylib `Font` and participates in the standard asset cache and invalidation lifecycle.
-
-### Markup + One-Way Binding
-
-CanvasUI supports additive XML-style markup (`.canvas`) so you can author panel trees without replacing the code-first API.
-
-```xml
-<Panel class="hud-root" style="padding: 12px; gap: 8px;">
-  <Label text="{HealthText}" class="hp" />
-  <Button text="Heal" onclick="OnHealClicked" />
-</Panel>
-```
-
-```csharp
-public sealed class HudViewModel : INotifyPropertyChanged
-{
-    public event PropertyChangedEventHandler? PropertyChanged;
-    public string HealthText { get; private set; } = "Health: 100";
-
-    public void OnHealClicked() { /* ... */ }
+Panel.hud {
+  flex-direction: row;
+  gap: 8px;
+  padding: 12px;
 }
 
-var vm = new HudViewModel();
-CanvasUI.EnableHotReload(true);
-CanvasUI.LoadStyleSheetFromAsset("UI/hud.css");
-CanvasUI.LoadMarkupFromAsset("UI/hud.canvas", vm, clearRoot: true);
-```
-
-#### Markup Rules
-
-- Tag names map to panel types (`Panel`, `Label`, `Button`, `TextEntry`, etc.)
-- `class="a b c"` maps to panel classes
-- `style="..."` accepts CSS declarations (same properties as stylesheets)
-- `on...` attributes (for example `onclick`, `onchanged`) bind to methods on the active binding context
-- Property bindings use `{PropertyName}` and are one-way (context -> UI)
-- `context="{ChildVm}"` assigns a local child context from the parent context
-
-#### Markup/Binding API
-
-| Method | Description |
-|--------|-------------|
-| `CanvasUI.LoadMarkup(markup, context?, clearRoot?)` | Build panel tree from raw markup text |
-| `CanvasUI.LoadMarkupFromAsset(path, context?, clearRoot?)` | Build panel tree from a `.canvas` asset |
-| `CanvasUI.SetBindingContext(context)` | Set root binding context for programmatic trees |
-| `CanvasUI.EnableHotReload(enabled)` | Enable/disable hot reload polling for loaded markup/styles assets |
-
----
-
-## Immediate-Mode UI (Legacy)
-
-The existing ImGui wrapper provides an immediate-mode API for HUDs, menus, and in-game interfaces. It remains functional but is expected to be scoped to editor-only in a future release.
-
-### Core Pattern
-
-Call `UI.Draw()` every frame you want UI visible:
-
-```csharp
-using FrinkyEngine.Core.ECS;
-using FrinkyEngine.Core.UI;
-
-public class HudComponent : Component
-{
-    private float _health01 = 0.75f;
-    private bool _showDebug;
-
-    public override void Update(float dt)
-    {
-        UI.Draw(ctx =>
-        {
-            using var panel = ctx.Panel("HUD", new UiPanelOptions
-            {
-                Position = new System.Numerics.Vector2(16, 16),
-                Size = new System.Numerics.Vector2(320, 120),
-                HasTitleBar = false,
-                Movable = false,
-                Resizable = false
-            });
-
-            if (!panel.IsVisible)
-                return;
-
-            ctx.Text("Player HUD", 24f);
-            ctx.ProgressBar("health", _health01, overlayText: "Health");
-            ctx.Checkbox("debug_toggle", "Show Debug", ref _showDebug);
-        });
-    }
+Button {
+  font-size: 18px;
 }
 ```
 
-### Available Widgets
+## Common Built-In Panels
 
-#### Layout
+| Panel | Use it for |
+|-------|------------|
+| `Panel` | layout containers |
+| `Label` | text output |
+| `Button` | click actions |
+| `Checkbox` | boolean toggles |
+| `Slider` | normalized or mapped value selection |
+| `ProgressBar` | health, stamina, loading, cooldown |
+| `TextEntry` | single-line text input |
+| `ScrollPanel` | scrollable content |
+| `Image` | textures and render textures |
 
-| Method | Description |
-|--------|-------------|
-| `Panel(id, options)` | Create a UI panel/window (returns `UiScope`) |
-| `Horizontal(id, columns)` | Table layout with column count |
-| `Vertical(id)` | Vertical grouping scope |
-| `NextCell()` | Advance to next cell in horizontal layout |
-| `Spacer(width, height)` | Empty spacer region (default height: 8px) |
-| `SameLine(offset, spacing)` | Place next widget on the same line |
-| `Separator()` | Draw a horizontal separator line |
+## Immediate-Mode UI
 
-#### Display
+The older `FrinkyEngine.Core.UI` wrapper still exists, but it is no longer the recommended path for new gameplay UI.
 
-| Method | Description |
-|--------|-------------|
-| `Text(text, fontPx, style)` | Draw text with optional font size and style |
-| `ProgressBar(id, value01, size, overlayText)` | Draw a progress bar (0.0 to 1.0) |
-| `Image(image, size, flipY)` | Draw a texture image |
+Use it when:
 
-#### Input
+- you already have existing gameplay UI built on it
+- you need a quick immediate-mode overlay
 
-| Method | Description |
-|--------|-------------|
-| `Button(id, label, fontPx, size, disabled)` | Clickable button (returns true when clicked) |
-| `Checkbox(id, label, ref value, fontPx, disabled)` | Toggle checkbox (returns true when changed) |
-| `SliderFloat(id, label, ref value, min, max, fontPx, disabled)` | Float slider (returns true when changed) |
-
-### Panel Options
-
-`UiPanelOptions` controls panel appearance and behavior:
-
-| Property | Default | Description |
-|----------|---------|-------------|
-| `Position` | null | Panel position in pixels |
-| `Size` | null | Panel size in pixels |
-| `HasTitleBar` | false | Show a title bar |
-| `Movable` | false | Allow dragging to move |
-| `Resizable` | false | Allow resize handles |
-| `NoBackground` | false | Hide panel background |
-| `AutoResize` | false | Auto-size to fit contents |
-| `Scrollbar` | false | Show scrollbar on overflow |
-
-### Styling
-
-`UiStyle` provides per-widget styling:
-
-| Property | Description |
-|----------|-------------|
-| `TextColor` | Override text color (Vector4 RGBA) |
-| `WrapWidth` | Text wrap width in pixels (0 = no wrapping) |
-| `Disabled` | Render in disabled visual state |
-
-### Input Capture
-
-`UI.InputCapture` reports whether UI is consuming input, so your game can avoid processing input that the UI is handling:
-
-```csharp
-if (!UI.InputCapture.WantsMouse)
-{
-    // Process game mouse input
-}
-
-if (!UI.InputCapture.WantsKeyboard)
-{
-    // Process game keyboard input
-}
-```
-
-| Property | Description |
-|----------|-------------|
-| `WantsMouse` | UI is consuming mouse input |
-| `WantsKeyboard` | UI is consuming keyboard input |
-| `WantsTextInput` | UI is actively receiving text input |
-| `Any` | Any capture flag is active |
-
-### Font Sizes
-
-Pass pixel values (e.g. `24f`) to the `fontPx` parameter on any widget. The default font size is used when `fontPx` is `0`.
-
----
-
-## Debug Screen Text
-
-`DebugDraw.PrintString()` displays temporary on-screen messages, similar to Unreal Engine's Print String node. Messages appear as a text overlay in the top-left of the viewport and automatically disappear after their duration expires.
-
-```csharp
-using FrinkyEngine.Core.Rendering;
-
-// Simple message (green, 5 seconds)
-DebugDraw.PrintString("Hello world!");
-
-// Custom color and duration
-DebugDraw.PrintString("Health low!", 3f, new System.Numerics.Vector4(1, 0.3f, 0.3f, 1));
-
-// Keyed message — replaces existing entry with the same key
-DebugDraw.PrintString($"FPS: {fps}", 0.5f, key: "fps_counter");
-```
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `message` | required | Text to display |
-| `duration` | `5f` | Seconds to show the message |
-| `color` | green | RGBA `Vector4` (0-1 per channel) |
-| `key` | `null` | If set, replaces any existing message with the same key |
-
-**Editor-only**: Debug text renders in the editor viewport overlay. In runtime builds, `DebugDraw.PrintString` is a no-op. The `debug_print` console command can also display debug text.
+Avoid using it as the default choice for new game HUDs or menus.
 
 ## See Also
 
-- [CanvasUI Roadmap](CANVASUI_ROADMAP.md) — phased plan for the new retained-mode UI system
-- [UI Roadmap](roadmaps/ui_roadmap.md) — legacy ImGui UI plans
+- [Scripting](scripting.md) for general gameplay component structure
+- [Editor Guide](editor-guide.md) for creating Canvas assets
+- [CANVASUI_ROADMAP.md](CANVASUI_ROADMAP.md) if you specifically want the long-term direction for CanvasUI

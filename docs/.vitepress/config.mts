@@ -11,8 +11,8 @@ export default defineConfig({
   ignoreDeadLinks: true,
   themeConfig: {
     nav: [
-      { text: "Guides", link: "/getting-started" },
-      { text: "API", link: "/api/index" },
+      { text: "Start Here", link: "/getting-started" },
+      { text: "Generated API", link: "/api/index" },
       { text: "GitHub", link: "https://github.com/frinky04/FrinkyEngine" },
     ],
     search: {
@@ -23,23 +23,33 @@ export default defineConfig({
     },
     sidebar: [
       {
-        text: "Start Here",
+        text: "First Project",
         items: [
           { text: "Overview", link: "/" },
           { text: "Getting Started", link: "/getting-started" },
-          { text: "Editor Guide", link: "/editor-guide" },
-          { text: "Scripting", link: "/scripting" },
+          { text: "Editor Workflow", link: "/editor-guide" },
+          { text: "Choosing Components", link: "/components" },
         ],
       },
       {
-        text: "Core Guides",
+        text: "Gameplay",
         items: [
-          { text: "Components Reference", link: "/components" },
-          { text: "Physics", link: "/physics" },
-          { text: "Audio", link: "/audio" },
-          { text: "Rendering & Post-Processing", link: "/rendering" },
+          { text: "Scripting", link: "/scripting" },
           { text: "Game UI", link: "/ui" },
           { text: "Prefabs & Entity References", link: "/prefabs" },
+        ],
+      },
+      {
+        text: "Engine Systems",
+        items: [
+          { text: "Physics", link: "/physics" },
+          { text: "Rendering & Post-Processing", link: "/rendering" },
+          { text: "Audio", link: "/audio" },
+        ],
+      },
+      {
+        text: "Shipping",
+        items: [
           { text: "Exporting & Packaging", link: "/exporting" },
           { text: "Project Settings", link: "/project-settings" },
         ],
@@ -47,16 +57,7 @@ export default defineConfig({
       {
         text: "Reference",
         items: [
-          { text: "API Reference", link: "/api/index" },
-        ],
-      },
-      {
-        text: "Roadmaps",
-        items: [
-          { text: "CanvasUI Roadmap", link: "/CANVASUI_ROADMAP" },
-          { text: "Audio Roadmap", link: "/roadmaps/audio_roadmap" },
-          { text: "UI Roadmap (Legacy)", link: "/roadmaps/ui_roadmap" },
-          { text: "Asset Icon Guide", link: "/roadmaps/asset_icon_implementation_guide" },
+          { text: "Generated API Reference", link: "/api/index" },
         ],
       },
     ],

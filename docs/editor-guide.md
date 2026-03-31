@@ -1,106 +1,123 @@
 # Editor Guide
 
-The FrinkyEngine editor is an ImGui-based desktop application for building and testing scenes.
+Use this guide when you want to understand the normal editor loop: open a project, place content, inspect entities, run the scene, and save your work.
 
-## Panels
+## Typical Workflow
 
-| Panel | Description |
-|-------|-------------|
-| **Viewport** | 3D scene rendering with transform gizmos (translate, rotate, scale) |
-| **Hierarchy** | Entity tree with drag-and-drop reordering and parenting |
-| **Inspector** | Component editing with attribute-driven reflection (engine and script components use the same inspector pipeline) |
-| **Assets** | File browser with drag-and-drop for models, prefabs, and scenes |
-| **Console** | Log stream viewer with severity filtering, text search, timestamps toggle, and entry counts |
-| **Performance** | Frame time and rendering statistics, including an `Ignore Editor` toggle for runtime-estimate CPU views. Collapsible **Asset Icons** section shows queue depth, cache hit rate, and generation timing. |
+1. Open or create a project.
+2. Open a scene.
+3. Add or select entities in the hierarchy.
+4. Edit components in the inspector.
+5. Drag assets in from the asset browser.
+6. Build scripts with `Ctrl+B` when gameplay code changes.
+7. Press `F5` to play, inspect the result, then stop and continue editing.
+8. Save the scene with `Ctrl+S`.
 
-## Transform Gizmos
+## Open or Create a Project
 
-- **1** — Translate mode
-- **2** — Rotate mode
-- **3** — Scale mode
-- **X** — Toggle world/local space
+- Open an existing project by launching the editor with a `.fproject` path or using the file menu.
+- Create a new project with `File -> New Project`.
+- For source-built projects, build gameplay scripts before testing them.
 
-## Inspector Gizmos
+## Build and Run Gameplay
 
-Some components expose draggable gizmo handles in the viewport (for example, IK target and pole-target positions). Click a gizmo sphere to select it, then use the translate handle to reposition it. The entity transform gizmo is hidden while an inspector gizmo is active; click empty space to deselect.
+### Build scripts
 
-## Entity Management
+Build game assemblies from the editor with `File -> Build Scripts` or `Ctrl+B`.
 
-- **Create**: right-click in the hierarchy or use the `Entity` menu
-- **Rename**: select an entity and press `F2`
-- **Delete**: select an entity and press `Delete`
-- **Duplicate**: `Ctrl+D`
-- **Reparent**: drag entities in the hierarchy to reorder or nest them
-- **Select all**: `Ctrl+A`
-- **Deselect**: `Escape`
+Use this after:
 
-## Play and Simulate Modes
+- changing gameplay C# code
+- adding a new component type
+- changing serialized gameplay properties
 
-- **Play** (`F5`) — runs gameplay from the scene's main camera, locks scene editing
-- **Simulate** (`Alt+F5`) — runs gameplay while keeping the editor camera and tools available
-- The editor snapshots the scene before entering either mode and restores it on stop
-- **Shift+F1** — toggle cursor lock during play mode
+The editor hot-reloads the game assembly after a successful build.
 
-## Asset Browser
+### Play and simulate
 
-- Browse project files with filtering and search
-- Drag-and-drop models (`.obj`, `.gltf`, `.glb`), prefabs (`.fprefab`), and scenes (`.fscene`) into the viewport or hierarchy
-- Tags and type filters for quick asset lookup
-- Canvas UI files (`.canvas`) are classified as **Canvas** assets with their own icon/filter
-- Right-click an asset for context actions: open, copy path, rename, delete, tag management, and **Regenerate Icon** (textures, models, prefabs)
-- Small status dots appear on asset thumbnails during icon generation: gray (queued), blue (generating), red (failed)
-- Click the settings cog (⚙) to access:
-  - **Refresh** — manually refresh the asset database
-  - **Grid/List View** — toggle between view modes
-  - **Icon Size** — scale asset icons (0.5x–3.0x)
-  - **Hide Unrecognised Assets** — filter out files with unknown types when browsing all assets
-  - **Tag Manager** — create, edit, and delete asset tags
+- **Play** (`F5`) runs gameplay from the scene's main camera and locks scene editing.
+- **Simulate** (`Alt+F5`) runs gameplay while keeping the editor camera and tools available.
+- The editor snapshots the scene before entering either mode and restores it when you stop.
+- **Shift+F1** toggles cursor lock during play mode.
 
-## Creating Assets
+## Place and Edit Scene Content
 
-Use `Create` in the top menu bar to create assets:
+### Entity workflow
+
+- Create entities by right-clicking in the hierarchy background or using the hierarchy's `Create` context menu.
+- Rename with `F2`.
+- Duplicate with `Ctrl+D`.
+- Delete with `Delete`.
+- Reparent by dragging entities in the hierarchy.
+
+### Transform workflow
+
+- **1** translate
+- **2** rotate
+- **3** scale
+- **X** toggle world/local transform space
+
+Some components expose their own viewport gizmos. When one of those is active, the normal entity transform gizmo is temporarily hidden.
+
+### Asset workflow
+
+- Drag models (`.obj`, `.gltf`, `.glb`), prefabs (`.fprefab`), and scenes (`.fscene`) from the asset browser into the viewport or hierarchy.
+- Use search, tags, and type filters to narrow the asset list.
+- Right-click assets for actions such as rename, delete, copy path, tag management, and `Regenerate Icon`.
+
+Status dots on asset thumbnails:
+
+- gray: queued
+- blue: generating
+- red: failed
+
+## Common Authoring Tasks
+
+### Create a new script or CanvasUI asset
+
+Open a project first, then use the top menu:
 
 - `Create -> Create Script...`
 - `Create -> Create Canvas...`
 
-Both entries open the same asset-creation modal and create files directly under `Assets/` (folder picker is not used).
+These are created under `Assets/`.
 
-## Building Scripts
+### Add physics quickly
 
-Build game assemblies from the editor with `File -> Build Scripts` (`Ctrl+B`). The editor hot-reloads the assembly without restarting.
+Right-click an entity in the hierarchy and choose **Add Physics**.
 
-## Quick-Add Physics
+Available presets:
 
-Right-click an entity in the Hierarchy and select **Add Physics** to quickly add collider and rigidbody components. Three presets are available: **Static Body** (collider only, registered as a static collidable), **Dynamic Body** (collider + dynamic rigidbody), and **Kinematic Body** (collider + kinematic rigidbody). The collider shape and size are auto-detected from the entity's primitive component (Cube, Sphere, Cylinder, or Plane). For entities with `MeshRendererComponent`, the **Static Body** and **Kinematic Body** shortcuts prefer `MeshColliderComponent`; **Dynamic Body** still uses the primitive/default fallback because dynamic mesh colliders are not supported. The same shortcuts are available in the Inspector under **Quick Add Physics**.
+- **Static Body** for world geometry and immovable blockers
+- **Dynamic Body** for simulated objects
+- **Kinematic Body** for scripted movers
 
-## Physics Hitbox Preview
+For primitive entities, collider size is inferred from the primitive. For mesh renderers, static and kinematic quick-add prefer `MeshColliderComponent` when possible.
 
-Press `F8` to toggle a wireframe overlay showing collider shapes in the viewport.
+### Preview colliders and bones
 
-## Collider Edit Mode
+- `F8` toggles collider wireframe preview.
+- `F9` enters collider edit mode for resizing or repositioning colliders in the viewport.
+- `F10` shows skeleton joints and parent-child lines for entities with a skinned mesh animator.
 
-Press `F9` (or use **View -> Collider Edit Mode**) to enter collider edit mode. While active:
+## Panels
 
-- All collider wireframes in the scene are displayed.
-- The selected entity's collider can be resized and repositioned using an ImGuizmo handle (Scale + Translate).
-- Box colliders: drag the scale handles to adjust `Size`, or translate to move the `Center` offset.
-- Sphere colliders: drag any scale handle to uniformly adjust `Radius`, or translate to move `Center`.
-- Capsule colliders: drag scale handles to adjust `Radius` (X/Z) and `Length` (Y), or translate to move `Center`.
-- Mesh colliders show their source-model bounds in the hitbox preview, but collider edit mode does not resize triangle-mesh geometry.
-- The normal entity transform gizmo is replaced by the collider gizmo while this mode is active.
-- Changes are tracked by the undo system.
+| Panel | What you use it for |
+|-------|----------------------|
+| **Viewport** | Navigate the scene, move entities, and inspect overlays |
+| **Hierarchy** | Select, rename, duplicate, and reparent entities |
+| **Inspector** | Edit engine and gameplay component properties |
+| **Assets** | Browse project files and drag assets into the scene |
+| **Console** | Read logs, warnings, and script build errors |
+| **Performance** | Inspect frame timing, rendering stats, and asset icon generation stats |
 
-## Bone Preview
+## Console and Runtime Overlay
 
-Press `F10` to toggle a bone preview overlay in the viewport. When enabled, bone joints are drawn as small wireframe spheres and parent-child connections are drawn as lines for all entities with a Skinned Mesh Animator component. The inspector also shows a collapsible bone hierarchy tree under the Skinned Mesh Animator component header.
-
-## Stats Overlay and Developer Console
-
-- **F3** — cycle stats overlay modes: None → FPS + MS → Advanced Stats → Most Verbose Stats
-- **\`** (Grave) — toggle the developer console
-  - `help` lists registered commands and cvars
-  - `Tab` cycles suggestions, `Enter` accepts and executes
-  - `Up/Down` navigates command history
+- **F3** cycles stats overlay modes.
+- **\`** toggles the developer console.
+- `help` lists commands and CVars.
+- `Tab` cycles suggestions.
+- `Up/Down` navigates command history.
 
 ## Keyboard Shortcuts
 
@@ -120,56 +137,22 @@ Press `F10` to toggle a bone preview overlay in the viewport. When enabled, bone
 |----------|--------|
 | Ctrl+Z | Undo |
 | Ctrl+Y | Redo |
-| Delete | Delete Entity |
 | Ctrl+D | Duplicate Entity |
+| Delete | Delete Entity |
 | F2 | Rename Entity |
 | Ctrl+A | Select All |
 | Escape | Deselect |
 
-### Build and Runtime
+### Play and View
 
 | Shortcut | Action |
 |----------|--------|
-| Ctrl+B | Build Scripts |
-| F5 | Play / Stop |
-| Alt+F5 | Simulate / Stop |
-| Shift+F1 | Toggle Play Mode Cursor Lock |
-
-### Gizmos
-
-| Shortcut | Action |
-|----------|--------|
-| 1 | Translate Mode |
-| 2 | Rotate Mode |
-| 3 | Scale Mode |
-| X | Toggle World/Local Space |
-
-### View
-
-| Shortcut | Action |
-|----------|--------|
-| G | Toggle Game View |
-| F | Frame Selected (focus camera on selection) |
-| F3 | Cycle Stats Overlay |
-| F8 | Toggle Physics Hitbox Preview |
-| F9 | Toggle Collider Edit Mode |
-| F10 | Toggle Bone Preview |
-
-### Navigation
-
-| Shortcut | Action |
-|----------|--------|
-| Ctrl+F | Focus Hierarchy Search |
-| Right Arrow | Expand Selection (Hierarchy) |
-| Left Arrow | Collapse Selection (Hierarchy) |
-
-### Project and Tools
-
-| Shortcut | Action |
-|----------|--------|
-| Ctrl+Shift+O | Open Assets Folder |
-| Ctrl+Shift+V | Open Project in VS Code |
-| Ctrl+Shift+E | Export Game |
+| F5 | Play |
+| Alt+F5 | Simulate |
+| Shift+F1 | Toggle cursor lock |
+| F8 | Toggle collider preview |
+| F9 | Toggle collider edit mode |
+| F10 | Toggle bone preview |
 
 ### Prefabs
 
@@ -180,14 +163,3 @@ Press `F10` to toggle a bone preview overlay in the viewport. When enabled, bone
 | Ctrl+Alt+R | Revert Prefab |
 | Ctrl+Shift+U | Make Unique Prefab |
 | Ctrl+Alt+K | Unpack Prefab |
-
-### Camera Controls (Viewport)
-
-| Input | Action |
-|-------|--------|
-| Right Mouse Button (hold) | Free Look |
-| W/A/S/D (while right-mouse held) | Move Camera |
-| Left Shift (while right-mouse held) | 2.5x Camera Speed |
-| Mouse Scroll | Zoom (2x speed) |
-
-All keybinds are customizable per-project in `.frinky/keybinds.json`.

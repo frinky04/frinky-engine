@@ -4,53 +4,51 @@ layout: home
 hero:
   name: FrinkyEngine
   text: Build 3D games with a C# editor, runtime, and engine toolkit.
-  tagline: Learn the editor workflow, engine systems, export pipeline, and generated API surface.
+  tagline: Start fast, learn the editor workflow, and ship with focused engine guides.
   actions:
     - theme: brand
       text: Get Started
       link: /getting-started
     - theme: alt
-      text: Open the Editor Guide
+      text: First Editor Workflow
       link: /editor-guide
     - theme: alt
-      text: Browse the API
-      link: /api/index
+      text: Learn Scripting
+      link: /scripting
 
 features:
-  - title: C#-First Workflow
-    details: Build gameplay code with .NET 8, hot-reload game assemblies, and keep scenes and prefabs in readable JSON assets.
-  - title: Editor + Runtime
-    details: Author content in the ImGui editor, then ship with the standalone runtime and export pipeline.
-  - title: Engine Systems
-    details: Rendering, post-processing, physics, audio, prefabs, UI, and tooling docs live in one place.
+  - title: First Success First
+    details: Get from install to a running project quickly, then branch into focused guides only when you need them.
+  - title: Workflow-Oriented Docs
+    details: Learn the editor, scripting, prefabs, physics, rendering, audio, and shipping through practical tasks instead of feature dumps.
+  - title: Reference When You Need It
+    details: Keep generated API docs available for exact member lookup without forcing them into the main learning path.
 ---
 
 ## Start Here
 
-1. [Getting Started](/getting-started) for prerequisites, project creation, and first launch.
-2. [Editor Guide](/editor-guide) for panels, shortcuts, and scene-editing workflow.
-3. [Scripting](/scripting) for custom components, game assemblies, and gameplay code.
+1. [Getting Started](/getting-started) to choose a release or source build and get to a first playable result.
+2. [Editor Workflow](/editor-guide) to create or open a project, place content, play it, and save it.
+3. [Scripting](/scripting) to add your first gameplay component.
 
-## Guides
+## Common Tasks
 
-| Guide | Description |
-|-------|-------------|
-| [Getting Started](/getting-started) | Prerequisites, project creation, first steps |
-| [Editor Guide](/editor-guide) | Panels, gizmos, play and simulate modes, keyboard shortcuts |
-| [Scripting](/scripting) | Custom components, lifecycle, game assemblies, auto-serialization |
-| [Components Reference](/components) | Built-in components and key properties |
-| [Physics](/physics) | Rigidbodies, colliders, character controller, crouching |
-| [Audio](/audio) | 2D and 3D playback, components, mixer buses, attenuation |
-| [Rendering & Post-Processing](/rendering) | Lighting, materials, camera setup, skeletal animation, IK, bloom, fog, SSAO |
-| [Game UI](/ui) | CanvasUI retained-mode panels, flexbox layout, and legacy immediate-mode wrapper |
-| [Prefabs & Entity References](/prefabs) | Prefab workflow, overrides, entity cross-linking |
-| [Exporting & Packaging](/exporting) | Export pipeline, runtime modes, packaging scripts |
-| [Project Settings](/project-settings) | `.fproject`, `project_settings.json`, editor settings |
+| Task | Guide |
+|------|-------|
+| Get the editor running and verify a project works | [Getting Started](/getting-started) |
+| Learn the main editor loop | [Editor Workflow](/editor-guide) |
+| Add gameplay code | [Scripting](/scripting) |
+| Pick the right built-in components | [Choosing Components](/components) |
+| Spawn reusable entity setups | [Prefabs & Entity References](/prefabs) |
+| Set up movement, collisions, or triggers | [Physics](/physics) |
+| Set up cameras, lights, materials, and post-processing | [Rendering & Post-Processing](/rendering) |
+| Add sound effects or music | [Audio](/audio) |
+| Build game HUDs or menus | [Game UI](/ui) |
+| Prepare and validate a shipping build | [Exporting & Packaging](/exporting) |
 
-## Reference
+## Supporting Reference
 
-- [API Reference](/api/index) for the auto-generated Core API docs.
-- [CanvasUI Roadmap](/CANVASUI_ROADMAP) for the active game UI direction.
-- [Audio Roadmap](/roadmaps/audio_roadmap) for planned audio-system work.
-- [UI Roadmap (Legacy)](/roadmaps/ui_roadmap) for the older immediate-mode wrapper plan.
-- [Asset Icon Roadmap](/roadmaps/asset_icon_implementation_guide) for generated preview and icon pipeline work.
+- [Project Settings](/project-settings) for `.fproject` and `project_settings.json`.
+- [Generated API Reference](/api/index) for auto-generated type and member lookup.
+
+Development roadmaps stay in the repository, but they are intentionally not part of the main user learning path.
