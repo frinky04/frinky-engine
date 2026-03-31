@@ -1177,6 +1177,23 @@ public class EditorApplication
         }
     }
 
+    public void RefreshScenePrefabInstances()
+    {
+        if (!CanEditScene || CurrentScene == null)
+            return;
+
+        RecordUndo();
+        int refreshed = Prefabs.RefreshPrefabInstancesInScene();
+        if (refreshed <= 0)
+            return;
+
+        RefreshUndoBaseline();
+        NotificationManager.Instance.Post(
+            refreshed == 1 ? "Scene prefab instance refreshed." : $"{refreshed} scene prefab instances refreshed.",
+            NotificationType.Success,
+            2.0f);
+    }
+
     private List<Entity> GetSelectedPrefabRoots()
     {
         var seen = new HashSet<Guid>();

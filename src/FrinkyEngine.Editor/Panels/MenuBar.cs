@@ -230,6 +230,16 @@ public class MenuBar
                 ImGui.Separator();
 
                 var hasUnresolved = _app.CanEditScene && _app.CurrentScene != null && HasUnresolvedComponents(_app.CurrentScene);
+                var hasScenePrefabs = _app.CanEditScene && _app.CurrentScene != null && _app.CurrentScene.Entities.Any(_app.Prefabs.IsPrefabRoot);
+                ImGui.BeginDisabled(!hasScenePrefabs);
+                if (ImGui.MenuItem("Fix Scene Prefabs"))
+                {
+                    _app.RefreshScenePrefabInstances();
+                }
+                ImGui.EndDisabled();
+
+                ImGui.Separator();
+
                 ImGui.BeginDisabled(!hasUnresolved);
                 if (ImGui.MenuItem("Clean Up Unresolved Components"))
                 {

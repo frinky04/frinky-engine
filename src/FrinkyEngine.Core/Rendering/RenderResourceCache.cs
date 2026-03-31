@@ -190,17 +190,17 @@ internal sealed class RenderResourceCache : IRenderGeometryQueries, IDisposable
             return null;
 
         int renderVersion = renderable.RenderVersion;
-        int transformVersion = renderable.Entity.Transform.TransformVersion;
+        var worldMatrix = renderable.Entity.Transform.WorldMatrix;
 
         if (_worldBoundsCache.TryGetValue(renderable, out var cached)
             && cached.RenderVersion == renderVersion
-            && cached.TransformVersion == transformVersion)
+            && cached.WorldMatrix.Equals(worldMatrix))
         {
             return cached.Bounds;
         }
 
-        var bounds = TransformBounds(resource.LocalBounds, renderable.Entity.Transform.WorldMatrix);
-        _worldBoundsCache[renderable] = new CachedWorldBounds(renderVersion, transformVersion, bounds);
+        var bounds = TransformBounds(resource.LocalBounds, worldMatrix);
+        _worldBoundsCache[renderable] = new CachedWorldBounds(renderVersion, worldMatrix, bounds);
         return bounds;
     }
 
@@ -596,5 +596,5 @@ internal sealed class RenderResourceCache : IRenderGeometryQueries, IDisposable
         public bool OwnsModel { get; }
     }
 
-    private readonly record struct CachedWorldBounds(int RenderVersion, int TransformVersion, BoundingBox Bounds);
+    private readonly record struct CachedWorldBounds(int RenderVersion, Matrix4x4 WorldMatrix, BoundingBox Bounds);
 }

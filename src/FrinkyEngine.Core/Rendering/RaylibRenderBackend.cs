@@ -381,12 +381,12 @@ internal sealed class RaylibRenderBackend : IRenderBackend
         Rlgl.EnableDepthTest();
         Rlgl.EnableDepthMask();
         Rlgl.ColorMask(false, false, false, false);
-        DrawRenderables(visibleSet.VisibleObjects, RenderPass.Depth, _selectionMaskShader);
+        DrawRenderables(visibleSet.VisibleObjects, RenderPass.SelectionMask, _selectionMaskShader);
 
         Rlgl.DrawRenderBatchActive();
         Rlgl.ColorMask(true, true, true, true);
         Rlgl.DisableDepthMask();
-        DrawRenderables(visibleSet.SelectedObjects, RenderPass.Depth, _selectionMaskShader);
+        DrawRenderables(visibleSet.SelectedObjects, RenderPass.SelectionMask, _selectionMaskShader);
 
         Rlgl.DrawRenderBatchActive();
         Rlgl.EnableDepthMask();
@@ -490,6 +490,12 @@ internal sealed class RaylibRenderBackend : IRenderBackend
         RenderPass pass,
         Shader passShader)
     {
+        if (pass == RenderPass.SelectionMask)
+        {
+            DrawRenderablesSequential(renderObjects, pass, passShader);
+            return;
+        }
+
         if (!RenderRuntimeCvars.AutoInstancingEnabled)
         {
             DrawRenderablesSequential(renderObjects, pass, passShader);
@@ -690,7 +696,7 @@ internal sealed class RaylibRenderBackend : IRenderBackend
         if (materialConfig != null)
             MaterialApplicator.ApplyToMaterial(ref material, materialConfig);
 
-        if (pass == RenderPass.Depth)
+        if (pass != RenderPass.Main)
         {
             material.Shader = passShader;
             SetShaderBool(passShader, GetUseInstancingLocation(passShader), usesInstancing);
@@ -717,7 +723,13 @@ internal sealed class RaylibRenderBackend : IRenderBackend
             return false;
         }
 
-        var variant = pass == RenderPass.Main ? RenderShaderVariant.Lit : RenderShaderVariant.Depth;
+        var variant = pass switch
+        {
+            RenderPass.Main => RenderShaderVariant.Lit,
+            RenderPass.Depth => RenderShaderVariant.Depth,
+            RenderPass.SelectionMask => RenderShaderVariant.SelectionMask,
+            _ => RenderShaderVariant.Depth
+        };
         key = new RenderBatchKey(renderObject.MeshHandle, renderObject.MaterialHandle, variant, UsesSkinning: false, UsesInstancing: true);
         return renderObject.MeshHandle.IsValid && renderObject.MaterialHandle.IsValid;
     }
@@ -1409,7 +1421,8 @@ internal sealed class RaylibRenderBackend : IRenderBackend
     private enum RenderPass
     {
         Main = 0,
-        Depth = 1
+        Depth = 1,
+        SelectionMask = 2
     }
 
     private readonly record struct RenderBatchKey(

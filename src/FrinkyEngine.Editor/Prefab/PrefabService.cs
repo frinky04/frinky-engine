@@ -229,6 +229,34 @@ public class PrefabService
             RecalculateOverridesForRoot(root);
     }
 
+    public int RefreshPrefabInstancesInScene()
+    {
+        if (_app.CurrentScene == null)
+            return 0;
+
+        var roots = _app.CurrentScene.Entities.Where(IsPrefabRoot).ToList();
+        if (roots.Count == 0)
+            return 0;
+
+        var selectedMappings = BuildSelectedMappings(roots);
+        var replacedRoots = new List<Entity>(roots.Count);
+
+        foreach (var root in roots)
+        {
+            var replacementOverrides = root.Prefab?.Overrides?.Clone() ?? new PrefabOverridesData();
+            var replacement = ReplacePrefabRoot(root, replacementOverrides);
+            if (replacement != null)
+                replacedRoots.Add(replacement);
+        }
+
+        RestoreSelectionAfterSync(selectedMappings, replacedRoots);
+
+        foreach (var root in replacedRoots)
+            RecalculateOverridesForRoot(root);
+
+        return replacedRoots.Count;
+    }
+
     public void RecalculateOverridesForRoot(Entity root)
     {
         if (!IsPrefabRoot(root) || root.Prefab == null)
