@@ -34,3 +34,6 @@ imgui.ini
 nul
 .claude/settings.local.json
 /.desloppify
+node_modules/
+docs/.vitepress/cache/
+docs/.vitepress/dist/

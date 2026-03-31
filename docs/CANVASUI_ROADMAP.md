@@ -1,18 +1,57 @@
-# CanvasUI — Full Replacement Plan
-
-## Context
-
-FrinkyEngine currently uses an immediate-mode ImGui wrapper (`FrinkyEngine.Core.UI`) for game UI. This is ~3,150 lines in Core + ~9,950 lines in Editor panels. The goal is to replace the **game-facing** UI with a new retained-mode system called **CanvasUI**, heavily inspired by S&box's web-like Panel/CSS/flexbox architecture.
-
-This is a clean break — no migration path, no backwards compatibility. The editor keeps ImGui for now. The old `FrinkyEngine.Core.UI` namespace gets renamed/scoped to editor-only usage later.
-
+---
+title: CanvasUI Roadmap
 ---
 
-## Phase 1: Foundation ✅ (Implemented)
+# CanvasUI Roadmap
 
-Core panel tree, flexbox layout via Yoga, basic rendering, and input.
+## Summary
 
-### 1.1 Namespace + project structure
+CanvasUI is the active roadmap for FrinkyEngine's game-facing UI. It replaces the immediate-mode `FrinkyEngine.Core.UI` gameplay layer with a retained-mode panel system inspired by web UI patterns, while the editor continues to use ImGui.
+
+This is a clean break. There is no planned backward-compatibility layer for gameplay UI.
+
+## Status
+
+- State: Active roadmap
+- Current milestone: Foundation and CSS styling are implemented
+- Scope: Runtime and game-facing UI
+- Related docs: [Game UI](ui.md), [Legacy UI Roadmap](roadmaps/ui_roadmap.md)
+
+## Current Baseline
+
+FrinkyEngine currently has:
+
+- A retained-mode panel tree under `src/FrinkyEngine.Core/CanvasUI/`
+- Yoga-backed flexbox layout
+- Basic rendering, clipping, input, and pseudo-class support
+- Runtime integration in `FrinkyEngine.Runtime`
+- CSS parsing and style resolution
+- Core widgets including labels, buttons, text entry, sliders, checkboxes, progress bars, scroll panels, and images
+
+## Design Goals
+
+- Keep the gameplay UI API retained-mode and composition-friendly
+- Use familiar layout and styling concepts such as panels, classes, and flexbox
+- Preserve a clear split between gameplay UI and editor UI
+- Add features in testable slices instead of one large rewrite
+
+## Roadmap Phases
+
+| Phase | Status | Outcome |
+|-------|--------|---------|
+| Phase 1 | Implemented | Panel tree, Yoga layout, rendering, input, runtime wiring |
+| Phase 2 | Implemented in part | CSS styling engine, renderer refactor, more built-in widgets |
+| Phase 3 | Planned | Markup, data binding, hot reload, asset integration |
+| Phase 4 | Planned | Transitions, transforms, batching, gamepad navigation |
+| Phase 5 | Planned | Migration of overlays and retirement of old gameplay UI |
+
+## Phase Details
+
+### Phase 1: Foundation
+
+Phase 1 established the retained-mode UI core: layout, rendering, input, and engine integration.
+
+#### Namespace and project structure
 
 Created `src/FrinkyEngine.Core/CanvasUI/` with:
 
@@ -48,11 +87,11 @@ CanvasUI/
     KeyboardEvent.cs
 ```
 
-### 1.2 Yoga dependency
+#### Yoga dependency
 
 Added `IceReaper.YogaSharp` (1.18.0.3) NuGet package to `FrinkyEngine.Core.csproj`. Wraps Facebook's Yoga C library (used by React Native).
 
-### 1.3 Panel base class
+#### Panel base class
 
 Every UI element is a `Panel`. Key API:
 - `Id`, `Classes` (list of string class names)
@@ -64,7 +103,7 @@ Every UI element is a `Panel`. Key API:
 - Lifecycle: `OnCreated()`, `OnDeleted()`, `Tick()` (per-frame)
 - Child management: `AddChild<T>()`, `RemoveChild()`, `DeleteChildren()`
 
-### 1.4 Rendering backend
+#### Rendering backend
 
 Uses Raylib drawing API (`DrawRectangleRounded`, `DrawTextEx`, etc.) with Rlgl scissor clipping. Render pipeline:
 1. Disable depth test
@@ -72,14 +111,14 @@ Uses Raylib drawing API (`DrawRectangleRounded`, `DrawTextEx`, etc.) with Rlgl s
 3. Per panel: draw background rect → draw border → draw content (text/image) → recurse children
 4. Scissor clipping for `Overflow.Hidden`
 
-### 1.5 Engine integration
+#### Engine integration
 
 In `src/FrinkyEngine.Runtime/Program.cs`, within `RunGameLoop`:
 - After `UI.Initialize()`: `CanvasUI.Initialize()`
 - In the UI profile scope: `CanvasUI.Update(dt, screenW, screenH)`
 - At shutdown: `CanvasUI.Shutdown()`
 
-### 1.6 Usage example
+#### Usage example
 
 ```csharp
 var hud = CanvasUI.RootPanel.AddChild<Panel>(p => {
@@ -90,11 +129,9 @@ hud.AddChild<Label>(l => { l.Text = "Health: 100"; });
 hud.AddChild<Button>(b => { b.Text = "Menu"; b.OnClick += _ => OpenMenu(); });
 ```
 
----
+### Phase 2: CSS styling and more widgets
 
-## Phase 2: CSS Styling + More Widgets
-
-### 2a: CSS Styling + Renderer Refactor ✅ (Implemented)
+#### CSS styling and renderer refactor
 
 **Renderer refactor**: Content rendering moved from type-checks in `CanvasRenderer` to virtual `Panel.RenderContent()` overrides in `Label` and `Button`. Prepares the architecture for new panel types without touching the renderer.
 
@@ -121,7 +158,7 @@ Styles/Css/
 
 **Public API**: `CanvasUI.LoadStyleSheet(css)`, `CanvasUI.ClearStyleSheets()`.
 
-### 2b: More built-in panels
+#### More built-in panels
 
 | Panel | Purpose |
 |-------|---------|
@@ -132,15 +169,13 @@ Styles/Css/
 | `ScrollPanel` | Scrollable container, mouse wheel, scroll bar |
 | `Image` | Displays a Texture2D/RenderTexture |
 
-### 2.4 Border rendering
+#### Border rendering
 
 Rounded corners via tessellated triangle fans at each corner.
 
----
+### Phase 3: Markup and data binding
 
-## Phase 3: Markup + Data Binding
-
-### 3.1 XML markup format (`.canvas` files)
+#### XML markup format (`.canvas` files)
 
 ```xml
 <Panel class="hud-root">
@@ -151,21 +186,19 @@ Rounded corners via tessellated triangle fans at each corner.
 
 Parsed at runtime into Panel trees. **Not** Razor — avoids heavy `Microsoft.AspNetCore.Razor.Language` dependency.
 
-### 3.2 Data binding
+#### Data binding
 
 `{PropertyName}` syntax bound to a context object implementing `INotifyPropertyChanged`.
 
-### 3.3 Hot reload
+#### Hot reload
 
 File watcher on `.canvas` and `.css` files — rebuilds panel tree and re-applies styles during development.
 
-### 3.4 Asset integration
+#### Asset integration
 
 Markup/CSS loaded through `AssetManager` for both dev and exported builds.
 
----
-
-## Phase 4: Polish + Advanced Features
+### Phase 4: Polish and advanced features
 
 - **SDF font rendering** — Raylib's built-in SDF support for resolution-independent text
 - **Transitions** — CSS-like `transition: opacity 0.3s ease`, `:intro`/`:outro` pseudo-classes for enter/exit animations
@@ -175,18 +208,14 @@ Markup/CSS loaded through `AssetManager` for both dev and exported builds.
 - **Dirty flags** — Skip layout/style recalc when nothing changed
 - **Draw batching** — Minimize Rlgl state changes
 
----
-
-## Phase 5: Migration
+### Phase 5: Migration
 
 1. Port `EngineOverlays` (stats + dev console) to CanvasUI panels
 2. Port `DebugDraw.PrintString` to CanvasUI
 3. Move old `FrinkyEngine.Core.UI` to editor-only (or delete entirely)
 4. Remove `Hexa.NET.ImGui` dependency from `FrinkyEngine.Core.csproj`
 
----
-
-## Key Files Modified (Phase 1)
+## Key Files
 
 | File | Change |
 |------|--------|
@@ -194,14 +223,12 @@ Markup/CSS loaded through `AssetManager` for both dev and exported builds.
 | `src/FrinkyEngine.Runtime/Program.cs` | Wired CanvasUI.Initialize/Update/Shutdown into game loop |
 | `src/FrinkyEngine.Core/CanvasUI/**` | All new files (listed above) |
 
-## Verification
+## Verification Targets
 
 1. **Build** — `dotnet build FrinkyEngine.sln` compiles with no errors ✅
 2. **Runtime smoke test** — Launch runtime with a test scene; a game component creates a Panel with a Label and Button; panels render on screen with correct flexbox layout
 3. **Input test** — Hover highlights button (pseudo-class), click fires OnClick event
 4. **Coexistence** — Old ImGui UI (EngineOverlays) still works alongside CanvasUI in the same frame
-
----
 
 ## Supported CSS Properties
 
@@ -239,7 +266,7 @@ Markup/CSS loaded through `AssetManager` for both dev and exported builds.
 | `margin` | 1–4 `<length>`/`<percent>` values | `0` | Shorthand |
 | `margin-top/right/bottom/left` | `<length>`, `<percent>` | `0` | |
 
-### Supported selectors
+## Supported Selectors
 
 | Selector | Example | Notes |
 |----------|---------|-------|
@@ -250,8 +277,6 @@ Markup/CSS loaded through `AssetManager` for both dev and exported builds.
 | Child | `Panel > Label` | Direct child combinator |
 | Universal | `*` | Matches any panel |
 | Grouping | `Label, Button` | Comma-separated |
-
----
 
 ## Widget Behavior Notes
 

@@ -7,6 +7,12 @@ This guide walks you through installing FrinkyEngine, creating a game project, a
 - [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0)
 - Windows for `.bat` helper scripts (or use `dotnet` commands directly on any platform)
 
+## Download a Release or Build from Source
+
+If you want to try the editor or runtime without building the repository yourself, download a packaged release from [GitHub Releases](https://github.com/frinky04/frinky-engine/releases).
+
+If you want the latest source, example projects, or engine code for local development, clone the repository instead.
+
 ## Clone the Repository
 
 Example projects are stored as git submodules. Clone with `--recurse-submodules` to include them:

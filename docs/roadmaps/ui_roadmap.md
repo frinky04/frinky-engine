@@ -1,12 +1,24 @@
-# FrinkyEngine UI Roadmap (Legacy Immediate-Mode)
+---
+title: Legacy UI Roadmap
+---
 
-> **Note:** The game-facing UI direction has shifted to **CanvasUI**, a retained-mode panel system with flexbox layout. See [CanvasUI Roadmap](../CANVASUI_ROADMAP.md) for the active plan. This document covers the original ImGui wrapper roadmap, which remains relevant for editor UI.
+# UI Roadmap (Legacy Immediate-Mode)
 
-## Purpose
-This document defines the phased plan for FrinkyEngine's ImGui-based wrapper UI system.
-It focuses on a wrapper-first immediate-mode API powered by ImGui, with runtime/editor parity. The game-facing portions of this roadmap are superseded by CanvasUI.
+> The active game-facing UI direction is now [CanvasUI](../CANVASUI_ROADMAP.md). This page tracks the older ImGui-wrapper roadmap, which still matters for editor-facing UI.
 
-## Current Baseline (Phase v1 foundation, implemented)
+## Summary
+
+This roadmap defines the phased plan for FrinkyEngine's immediate-mode wrapper UI system. It focuses on a wrapper-first API powered by ImGui, with runtime and editor parity where practical.
+
+## Status
+
+- State: Legacy roadmap
+- Current baseline: Foundation work is implemented
+- Scope: Immediate-mode wrapper API and editor-adjacent UI work
+- Related docs: [Game UI](../ui.md), [CanvasUI Roadmap](../CANVASUI_ROADMAP.md)
+
+## Current Baseline
+
 The engine now includes:
 - `FrinkyEngine.Core.UI` wrapper API for game scripts (`UI.Draw((ctx) => { ... })`)
 - A strict no-raw-ImGui boundary for gameplay code
@@ -19,13 +31,25 @@ The engine now includes:
 - Input capture exposure (`UI.InputCapture`) so gameplay input can avoid conflicting with UI interaction
 
 ## Design Principles
+
 - Keep gameplay API stable and wrapper-only.
 - Stay immediate-mode for low mental overhead and iteration speed.
 - Preserve runtime/editor behavior parity where possible.
 - Ship in slices with testable acceptance criteria.
 - Prepare architecture for world-space UI without forcing it into v1.
 
-## Phase v2 - Input and Form Controls
+## Roadmap Phases
+
+| Phase | Status | Outcome |
+|-------|--------|---------|
+| v1 | Implemented | Wrapper API, core HUD widgets, dynamic font sizing, runtime/editor integration |
+| v2 | Planned | Form controls, focus helpers, input-consumption policies |
+| v3 | Planned | Styling layer, asset-aware helpers, diagnostics |
+| v4 | Planned | World-space UI support |
+
+## Phase Details
+
+### Phase v2: Input and form controls
 
 ### Goals
 - Expand from HUD/basic controls into practical menu/settings UI.
@@ -49,7 +73,7 @@ The engine now includes:
 - Keyboard and gamepad navigation works without raw ImGui calls.
 - Input capture behavior is deterministic across runtime and editor play mode.
 
-## Phase v3 - Styling, Assets, and Diagnostics
+### Phase v3: Styling, assets, and diagnostics
 
 ### Goals
 - Improve visual consistency and make style control easier for teams.
@@ -71,7 +95,7 @@ The engine now includes:
 - Teams can define and apply shared UI look rules from one place.
 - Large HUD/menu screens remain debuggable and measurable.
 
-## Phase v4 - World-Space UI
+### Phase v4: World-space UI
 
 ### Goals
 - Enable 3D-attached UI (diegetic panels, world labels, interaction prompts).

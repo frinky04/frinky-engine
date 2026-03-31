@@ -1,10 +1,22 @@
-# FrinkyEngine Audio Roadmap
+---
+title: Audio Roadmap
+---
 
-## Purpose
-This document defines the post-v1 roadmap for the FrinkyEngine audio system.
-It is written as an execution plan for future implementation, testing, and release decisions.
+# Audio Roadmap
 
-## Current Baseline (v1, implemented)
+## Summary
+
+This roadmap covers the planned post-v1 evolution of the FrinkyEngine audio system, including authored sound assets, spatial context, mixer controls, diagnostics, and backend extensibility.
+
+## Status
+
+- State: Planned
+- Current baseline: v1 audio system is implemented
+- Scope: Runtime audio authoring, playback, diagnostics, and backend strategy
+- Related docs: [Audio](../audio.md)
+
+## Current Baseline
+
 The current system provides:
 - UE-style static gameplay helpers (`PlaySound2D`, `PlaySoundAtLocation`, `SpawnSoundAttached`)
 - `AudioSourceComponent` and `AudioListenerComponent`
@@ -15,14 +27,26 @@ The current system provides:
 
 The next phases focus on authoring depth, runtime scalability, and advanced spatial features.
 
-## Design Principles for Future Work
+## Design Principles
+
 - Keep gameplay API stable. New features should be additive.
 - Keep editor and runtime behavior consistent.
 - Avoid hard-locking into one backend. Preserve backend abstraction boundaries.
 - Ship in small slices with measurable acceptance criteria.
 - Prefer deterministic behavior over hidden automation.
 
-## Phase v2 - Authoring and Voice Management
+## Roadmap Phases
+
+| Phase | Status | Outcome |
+|-------|--------|---------|
+| v2 | Planned | Authored `SoundAsset` workflow, concurrency, bus ducking, better editor tooling |
+| v3 | Planned | Occlusion, reverb zones, Doppler, spatial debugging |
+| v4 | Planned | Mixer snapshots, runtime profiling, advanced bus control |
+| v5 | Planned | Backend capability model, plugin path, import and cook improvements |
+
+## Phase Details
+
+### Phase v2: Authoring and voice management
 
 ### Goals
 - Move from "play a file" toward reusable authored sound behaviors.
@@ -79,7 +103,7 @@ The next phases focus on authoring depth, runtime scalability, and advanced spat
 - Complex authoring can create hard-to-debug layering effects.
 - Concurrency rules can surprise users unless inspector feedback is clear.
 
-## Phase v3 - Spatial Context and Environment Audio
+### Phase v3: Spatial context and environment audio
 
 ### Goals
 - Improve positional realism in practical game scenes.
@@ -125,7 +149,7 @@ The next phases focus on authoring depth, runtime scalability, and advanced spat
 - Occlusion raycasts can become expensive in dense scenes.
 - Reverb and occlusion interactions can over-attenuate if not normalized.
 
-## Phase v4 - Mixer, Snapshots, and Runtime Control
+### Phase v4: Mixer, snapshots, and runtime control
 
 ### Goals
 - Enable robust runtime mixing workflows for gameplay states.
@@ -164,7 +188,7 @@ The next phases focus on authoring depth, runtime scalability, and advanced spat
 - Advanced DSP controls can complicate support burden.
 - Incorrect limiter defaults can alter mix character unexpectedly.
 
-## Phase v5 - Platform and Extensibility Strategy
+### Phase v5: Platform and extensibility strategy
 
 ### Goals
 - Prepare for scale, portability, and optional higher-fidelity backends.

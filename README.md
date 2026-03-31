@@ -145,7 +145,14 @@ The template `.csproj` includes a placeholder comment for `FrinkyEngine.Core`. A
 
 ## Documentation
 
-Full engine documentation for game developers is available at [frinky04.github.io/FrinkyEngine](https://frinky04.github.io/FrinkyEngine/) and in the [`docs/`](docs/README.md) folder:
+Full engine documentation for game developers is available at [frinky04.github.io/FrinkyEngine](https://frinky04.github.io/FrinkyEngine/) and in the [`docs/`](docs/index.md) folder. The docs site is powered by VitePress:
+
+```bash
+npm install
+npm run docs:dev
+```
+
+Core guides:
 
 - [Getting Started](https://frinky04.github.io/FrinkyEngine/getting-started)
 - [Editor Guide](https://frinky04.github.io/FrinkyEngine/editor-guide)
@@ -159,7 +166,6 @@ Full engine documentation for game developers is available at [frinky04.github.i
 - [Exporting & Packaging](https://frinky04.github.io/FrinkyEngine/exporting)
 - [Project Settings](https://frinky04.github.io/FrinkyEngine/project-settings)
 - [API Reference](https://frinky04.github.io/FrinkyEngine/api/index) (auto-generated)
-- [Troubleshooting](https://frinky04.github.io/FrinkyEngine/troubleshooting)
 
 ## Repository Layout
 
