@@ -7,10 +7,12 @@ using BepuPhysics.Collidables;
 using BepuPhysics.Constraints;
 using BepuPhysics.Trees;
 using BepuUtilities.Memory;
+using FrinkyEngine.Core.Assets;
 using FrinkyEngine.Core.Components;
 using FrinkyEngine.Core.ECS;
 using FrinkyEngine.Core.Physics.Characters;
 using FrinkyEngine.Core.Rendering;
+using Raylib_cs;
 
 namespace FrinkyEngine.Core.Physics;
 
@@ -22,6 +24,7 @@ internal sealed class PhysicsSystem : IDisposable
         public RigidbodyComponent? Rigidbody;
         public required ColliderComponent Collider;
         public required TypedIndex ShapeIndex;
+        public MeshShapeCacheKey? SharedMeshShapeKey;
         public required BodyMotionType MotionType;
         public bool IsImplicitStatic;
         public BodyHandle? BodyHandle;
@@ -43,6 +46,57 @@ internal sealed class PhysicsSystem : IDisposable
         public bool HasPreviousKinematicTargetPose;
     }
 
+    private readonly struct MeshShapeCacheKey : IEquatable<MeshShapeCacheKey>
+    {
+        public MeshShapeCacheKey(string resolvedPath, bool usesMeshRendererFallback, int assetVersion, Vector3 bakedScale)
+        {
+            ResolvedPath = resolvedPath;
+            UsesMeshRendererFallback = usesMeshRendererFallback;
+            AssetVersion = assetVersion;
+            BakedScale = bakedScale;
+        }
+
+        public string ResolvedPath { get; }
+        public bool UsesMeshRendererFallback { get; }
+        public int AssetVersion { get; }
+        public Vector3 BakedScale { get; }
+
+        public bool Equals(MeshShapeCacheKey other)
+        {
+            return UsesMeshRendererFallback == other.UsesMeshRendererFallback &&
+                   AssetVersion == other.AssetVersion &&
+                   BakedScale.Equals(other.BakedScale) &&
+                   string.Equals(ResolvedPath, other.ResolvedPath, StringComparison.OrdinalIgnoreCase);
+        }
+
+        public override bool Equals(object? obj) => obj is MeshShapeCacheKey other && Equals(other);
+
+        public override int GetHashCode()
+        {
+            var hash = new HashCode();
+            hash.Add(StringComparer.OrdinalIgnoreCase.GetHashCode(ResolvedPath));
+            hash.Add(UsesMeshRendererFallback);
+            hash.Add(AssetVersion);
+            hash.Add(BakedScale.X);
+            hash.Add(BakedScale.Y);
+            hash.Add(BakedScale.Z);
+            return hash.ToHashCode();
+        }
+    }
+
+    private sealed class MeshShapeCacheEntry
+    {
+        public required TypedIndex ShapeIndex;
+        public int ReferenceCount;
+    }
+
+    private readonly struct MeshColliderSourceInfo
+    {
+        public required string ResolvedPath { get; init; }
+        public required bool UsesMeshRendererFallback { get; init; }
+        public required int AssetVersion { get; init; }
+    }
+
     private readonly Scene.Scene _scene;
     private readonly BufferPool _bufferPool = new();
     private readonly PhysicsMaterialTable _materialTable = new();
@@ -59,6 +113,11 @@ internal sealed class PhysicsSystem : IDisposable
     private readonly HashSet<Guid> _warnedCharacterParented = new();
     private readonly HashSet<Guid> _warnedCharacterNonCapsuleBody = new();
     private readonly HashSet<Guid> _warnedKinematicDiscontinuity = new();
+    private readonly HashSet<Guid> _warnedMeshMissingSource = new();
+    private readonly HashSet<Guid> _warnedMeshNoData = new();
+    private readonly HashSet<Guid> _warnedMeshSkinned = new();
+    private readonly HashSet<Guid> _warnedMeshDynamicUnsupported = new();
+    private readonly HashSet<Guid> _warnedMeshCharacterUnsupported = new();
     private readonly CharacterControllerBridge _characterBridge = new();
 
     // Handle-to-entity reverse mapping
@@ -77,6 +136,8 @@ internal sealed class PhysicsSystem : IDisposable
     private HashSet<(Guid, Guid)> _previousCollisionPairs = new();
     private HashSet<(Guid, Guid)> _currentCollisionPairs = new();
     private readonly Dictionary<(Guid, Guid), CollisionContactData> _collisionContactData = new();
+    private readonly Dictionary<MeshShapeCacheKey, MeshShapeCacheEntry> _meshShapeCache = new();
+    private readonly Dictionary<string, int> _meshAssetVersions = new(StringComparer.OrdinalIgnoreCase);
     private static FieldInfo? _poseIntegratorCallbacksField;
 
     private Simulation? _simulation;
@@ -228,6 +289,18 @@ internal sealed class PhysicsSystem : IDisposable
         // Reconciliation runs each frame; this hook exists so components can signal immediate intent.
     }
 
+    public void InvalidateAssets(IEnumerable<string> relativePaths)
+    {
+        foreach (var relativePath in relativePaths)
+        {
+            var normalized = NormalizeAssetPath(relativePath);
+            if (_meshAssetVersions.TryGetValue(normalized, out var version))
+                _meshAssetVersions[normalized] = version + 1;
+            else
+                _meshAssetVersions[normalized] = 1;
+        }
+    }
+
     public void OnEntityRemoved(Entity entity)
     {
         if (_simulation == null)
@@ -251,6 +324,7 @@ internal sealed class PhysicsSystem : IDisposable
         _warnedCharacterParented.Remove(entity.Id);
         _warnedCharacterNonCapsuleBody.Remove(entity.Id);
         _warnedKinematicDiscontinuity.Remove(entity.Id);
+        ClearMeshColliderWarnings(entity.Id);
     }
 
     public bool TryGetLinearVelocity(RigidbodyComponent rigidbody, out Vector3 velocity)
@@ -791,7 +865,11 @@ internal sealed class PhysicsSystem : IDisposable
         var authoritativePosition = transform.LocalPosition;
         var authoritativeRotation = NormalizeOrIdentity(transform.LocalRotation);
         var mass = MathF.Max(0.0001f, rigidbody?.Mass ?? 1f);
-        var shapeResult = CreateShape(collider, transform.LocalScale, mass);
+        var shapeResult = CreateShape(entity, rigidbody, collider, motionType, transform.LocalScale, mass);
+        if (!shapeResult.HasValue)
+            return null;
+
+        var resolvedShapeResult = shapeResult.Value;
         var hasCharacterController = motionType == BodyMotionType.Dynamic && entity.GetComponent<CharacterControllerComponent>() is { Enabled: true };
         var pose = hasCharacterController && collider is CapsuleColliderComponent capsuleCollider
             ? BuildCharacterBodyPose(authoritativePosition, transform.LocalScale, capsuleCollider)
@@ -799,7 +877,7 @@ internal sealed class PhysicsSystem : IDisposable
         var continuity = rigidbody?.ContinuousDetection == true
             ? ContinuousDetection.Continuous()
             : ContinuousDetection.Discrete;
-        var collidable = new CollidableDescription(shapeResult.ShapeIndex, 0.1f, continuity);
+        var collidable = new CollidableDescription(resolvedShapeResult.ShapeIndex, 0.1f, continuity);
         var material = new PhysicsMaterial(collider.Friction, collider.Restitution);
 
         BodyHandle? bodyHandle = null;
@@ -809,7 +887,7 @@ internal sealed class PhysicsSystem : IDisposable
         {
             case BodyMotionType.Dynamic:
             {
-                var dynamicInertia = shapeResult.DynamicInertia;
+                var dynamicInertia = resolvedShapeResult.DynamicInertia;
                 if (hasCharacterController)
                 {
                     dynamicInertia.InverseInertiaTensor = default;
@@ -839,7 +917,7 @@ internal sealed class PhysicsSystem : IDisposable
             }
             case BodyMotionType.Static:
             {
-                var description = new StaticDescription(pose, shapeResult.ShapeIndex, continuity);
+                var description = new StaticDescription(pose, resolvedShapeResult.ShapeIndex, continuity);
                 staticHandle = _simulation.Statics.Add(description);
                 _materialTable.Set(staticHandle.Value, material);
                 _staticHandleToEntityId[staticHandle.Value.Value] = entity.Id;
@@ -856,7 +934,8 @@ internal sealed class PhysicsSystem : IDisposable
             Entity = entity,
             Rigidbody = rigidbody,
             Collider = collider,
-            ShapeIndex = shapeResult.ShapeIndex,
+            ShapeIndex = resolvedShapeResult.ShapeIndex,
+            SharedMeshShapeKey = resolvedShapeResult.SharedMeshShapeKey,
             MotionType = motionType,
             IsImplicitStatic = isImplicitStatic,
             BodyHandle = bodyHandle,
@@ -914,7 +993,10 @@ internal sealed class PhysicsSystem : IDisposable
                 _simulation.Statics.Remove(staticHandle);
         }
 
-        _simulation.Shapes.Remove(state.ShapeIndex);
+        if (state.SharedMeshShapeKey is MeshShapeCacheKey meshShapeCacheKey)
+            ReleaseMeshShape(meshShapeCacheKey, state.ShapeIndex);
+        else
+            _simulation.Shapes.Remove(state.ShapeIndex);
     }
 
     private void PushSceneTransformsToPhysics(float stepDt)
@@ -1146,7 +1228,13 @@ internal sealed class PhysicsSystem : IDisposable
         }
     }
 
-    private ShapeCreationResult CreateShape(ColliderComponent collider, Vector3 localScale, float mass)
+    private ShapeCreationResult? CreateShape(
+        Entity entity,
+        RigidbodyComponent? rigidbody,
+        ColliderComponent collider,
+        BodyMotionType motionType,
+        Vector3 localScale,
+        float mass)
     {
         if (_simulation == null)
             throw new InvalidOperationException("Physics simulation is not initialized.");
@@ -1155,6 +1243,9 @@ internal sealed class PhysicsSystem : IDisposable
         absScale.X = MathF.Max(absScale.X, 0.0001f);
         absScale.Y = MathF.Max(absScale.Y, 0.0001f);
         absScale.Z = MathF.Max(absScale.Z, 0.0001f);
+
+        if (collider is not MeshColliderComponent)
+            ClearMeshColliderWarnings(entity.Id);
 
         switch (collider)
         {
@@ -1192,9 +1283,219 @@ internal sealed class PhysicsSystem : IDisposable
                     DynamicInertia = shape.ComputeInertia(mass)
                 };
             }
+            case MeshColliderComponent meshCollider:
+            {
+                if (entity.GetComponent<CharacterControllerComponent>() is { Enabled: true })
+                {
+                    WarnOnce(
+                        _warnedMeshCharacterUnsupported,
+                        entity.Id,
+                        $"Mesh collider on '{entity.Name}' is ignored because character-controller bodies require a capsule collider.");
+                    return null;
+                }
+
+                if (motionType == BodyMotionType.Dynamic)
+                {
+                    WarnOnce(
+                        _warnedMeshDynamicUnsupported,
+                        entity.Id,
+                        $"Mesh collider on '{entity.Name}' is ignored because MeshColliderComponent only supports static and kinematic physics participants.");
+                    return null;
+                }
+
+                if (!TryGetMeshColliderSourceInfo(entity, meshCollider, out var sourceInfo))
+                {
+                    WarnOnce(
+                        _warnedMeshMissingSource,
+                        entity.Id,
+                        $"Mesh collider on '{entity.Name}' is ignored because it has no resolved model source.");
+                    return null;
+                }
+
+                var model = AssetManager.Instance.LoadModel(sourceInfo.ResolvedPath);
+                if (ModelUsesSkinning(model))
+                {
+                    WarnOnce(
+                        _warnedMeshSkinned,
+                        entity.Id,
+                        $"Mesh collider on '{entity.Name}' is ignored because skinned or bone-driven models are not supported.");
+                    return null;
+                }
+
+                if (!TryAcquireMeshShape(sourceInfo, localScale, out var cacheKey, out var shapeIndex))
+                {
+                    WarnOnce(
+                        _warnedMeshNoData,
+                        entity.Id,
+                        $"Mesh collider on '{entity.Name}' is ignored because the resolved model source has no usable triangle mesh data.");
+                    return null;
+                }
+
+                ClearMeshColliderWarnings(entity.Id);
+                return new ShapeCreationResult
+                {
+                    ShapeIndex = shapeIndex,
+                    SharedMeshShapeKey = cacheKey,
+                    DynamicInertia = default
+                };
+            }
             default:
                 throw new NotSupportedException($"Collider type '{collider.GetType().Name}' is not supported.");
         }
+    }
+
+    private bool TryAcquireMeshShape(
+        MeshColliderSourceInfo sourceInfo,
+        Vector3 localScale,
+        out MeshShapeCacheKey cacheKey,
+        out TypedIndex shapeIndex)
+    {
+        if (_simulation == null)
+            throw new InvalidOperationException("Physics simulation is not initialized.");
+
+        var bakedScale = SanitizeSignedScale(localScale);
+        cacheKey = new MeshShapeCacheKey(sourceInfo.ResolvedPath, sourceInfo.UsesMeshRendererFallback, sourceInfo.AssetVersion, bakedScale);
+        if (_meshShapeCache.TryGetValue(cacheKey, out var existing))
+        {
+            existing.ReferenceCount++;
+            shapeIndex = existing.ShapeIndex;
+            return true;
+        }
+
+        var model = AssetManager.Instance.LoadModel(sourceInfo.ResolvedPath);
+        if (!TryCreateMeshShape(model, bakedScale, out shapeIndex))
+        {
+            cacheKey = default;
+            return false;
+        }
+
+        _meshShapeCache[cacheKey] = new MeshShapeCacheEntry
+        {
+            ShapeIndex = shapeIndex,
+            ReferenceCount = 1
+        };
+        return true;
+    }
+
+    private bool TryCreateMeshShape(Model model, Vector3 bakedScale, out TypedIndex shapeIndex)
+    {
+        if (_simulation == null)
+            throw new InvalidOperationException("Physics simulation is not initialized.");
+
+        shapeIndex = default;
+        if (!TryExtractMeshTriangles(model, bakedScale, out var triangles))
+            return false;
+
+        _bufferPool.Take<Triangle>(triangles.Count, out var triangleBuffer);
+        for (int i = 0; i < triangles.Count; i++)
+            triangleBuffer[i] = triangles[i];
+
+        var mesh = new BepuPhysics.Collidables.Mesh(triangleBuffer, Vector3.One, _bufferPool);
+        shapeIndex = _simulation.Shapes.Add(mesh);
+        return true;
+    }
+
+    private static unsafe bool TryExtractMeshTriangles(Model model, Vector3 bakedScale, out List<Triangle> triangles)
+    {
+        triangles = new List<Triangle>();
+        if (model.MeshCount <= 0)
+            return false;
+
+        // Imported render meshes are typically wound counterclockwise in right-handed coordinates.
+        // BEPU triangle meshes expect clockwise winding in right-handed coordinates, so flip by default.
+        // Mirrored scale already flips winding once, so only flip here when the determinant stays positive.
+        bool shouldFlipWinding = bakedScale.X * bakedScale.Y * bakedScale.Z > 0f;
+        for (int meshIndex = 0; meshIndex < model.MeshCount; meshIndex++)
+        {
+            var mesh = model.Meshes[meshIndex];
+            if (mesh.VertexCount <= 0 || mesh.TriangleCount <= 0 || mesh.Vertices == null)
+                continue;
+
+            if (mesh.Indices != null)
+            {
+                int requiredIndexCount = mesh.TriangleCount * 3;
+                for (int triangleIndex = 0; triangleIndex < requiredIndexCount; triangleIndex += 3)
+                {
+                    int indexA = mesh.Indices[triangleIndex];
+                    int indexB = mesh.Indices[triangleIndex + 1];
+                    int indexC = mesh.Indices[triangleIndex + 2];
+                    if ((uint)indexA >= (uint)mesh.VertexCount || (uint)indexB >= (uint)mesh.VertexCount || (uint)indexC >= (uint)mesh.VertexCount)
+                        continue;
+
+                    AddTriangle(
+                        ReadMeshVertex(mesh, indexA),
+                        ReadMeshVertex(mesh, indexB),
+                        ReadMeshVertex(mesh, indexC),
+                        bakedScale,
+                        shouldFlipWinding,
+                        triangles);
+                }
+            }
+            else
+            {
+                int availableTriangleCount = Math.Min(mesh.TriangleCount, mesh.VertexCount / 3);
+                for (int triangleIndex = 0; triangleIndex < availableTriangleCount; triangleIndex++)
+                {
+                    int baseIndex = triangleIndex * 3;
+                    AddTriangle(
+                        ReadMeshVertex(mesh, baseIndex),
+                        ReadMeshVertex(mesh, baseIndex + 1),
+                        ReadMeshVertex(mesh, baseIndex + 2),
+                        bakedScale,
+                        shouldFlipWinding,
+                        triangles);
+                }
+            }
+        }
+
+        return triangles.Count > 0;
+    }
+
+    private static unsafe Vector3 ReadMeshVertex(Raylib_cs.Mesh mesh, int vertexIndex)
+    {
+        int baseIndex = vertexIndex * 3;
+        return new Vector3(
+            mesh.Vertices[baseIndex],
+            mesh.Vertices[baseIndex + 1],
+            mesh.Vertices[baseIndex + 2]);
+    }
+
+    private static void AddTriangle(
+        Vector3 a,
+        Vector3 b,
+        Vector3 c,
+        Vector3 bakedScale,
+        bool flippedWinding,
+        List<Triangle> triangles)
+    {
+        a *= bakedScale;
+        b *= bakedScale;
+        c *= bakedScale;
+
+        if (flippedWinding)
+            (b, c) = (c, b);
+
+        var cross = Vector3.Cross(b - a, c - a);
+        if (cross.LengthSquared() <= 1e-12f)
+            return;
+
+        triangles.Add(new Triangle(a, b, c));
+    }
+
+    private static Vector3 SanitizeSignedScale(Vector3 localScale)
+    {
+        return new Vector3(
+            SanitizeSignedScaleComponent(localScale.X),
+            SanitizeSignedScaleComponent(localScale.Y),
+            SanitizeSignedScaleComponent(localScale.Z));
+    }
+
+    private static float SanitizeSignedScaleComponent(float value)
+    {
+        if (!float.IsFinite(value) || MathF.Abs(value) < 0.0001f)
+            return value < 0f ? -0.0001f : 0.0001f;
+
+        return value;
     }
 
     private static RigidPose BuildBodyPose(TransformComponent transform, ColliderComponent collider)
@@ -1233,7 +1534,75 @@ internal sealed class PhysicsSystem : IDisposable
         return new Capsule(radius, length);
     }
 
-    private static int ComputeConfigurationHash(Entity entity, RigidbodyComponent? rigidbody, ColliderComponent collider, bool isImplicitStatic)
+    private bool TryGetMeshColliderSourceInfo(Entity entity, MeshColliderComponent collider, out MeshColliderSourceInfo sourceInfo)
+    {
+        sourceInfo = default;
+
+        if (!TryResolveMeshColliderSourcePath(entity, collider, out var resolvedPath, out var usesMeshRendererFallback))
+            return false;
+
+        sourceInfo = new MeshColliderSourceInfo
+        {
+            ResolvedPath = resolvedPath,
+            UsesMeshRendererFallback = usesMeshRendererFallback,
+            AssetVersion = GetMeshAssetVersion(resolvedPath)
+        };
+        return true;
+    }
+
+    private static bool TryResolveMeshColliderSourcePath(Entity entity, MeshColliderComponent collider, out string resolvedPath, out bool usesMeshRendererFallback)
+    {
+        resolvedPath = string.Empty;
+        usesMeshRendererFallback = false;
+
+        if (!collider.MeshPath.IsEmpty)
+            return TryResolveModelAssetPath(collider.MeshPath.Path, out resolvedPath);
+
+        if (!collider.UseMeshRendererWhenEmpty)
+            return false;
+
+        if (entity.GetComponent<MeshRendererComponent>() is not { } meshRenderer || meshRenderer.ModelPath.IsEmpty)
+            return false;
+
+        usesMeshRendererFallback = true;
+        return TryResolveModelAssetPath(meshRenderer.ModelPath.Path, out resolvedPath);
+    }
+
+    private static bool TryResolveModelAssetPath(string path, out string resolvedPath)
+    {
+        resolvedPath = string.Empty;
+        if (string.IsNullOrWhiteSpace(path))
+            return false;
+
+        var normalized = NormalizeAssetPath(AssetDatabase.Instance.ResolveAssetPath(path) ?? path);
+        if (!File.Exists(AssetManager.Instance.ResolvePath(normalized)))
+            return false;
+
+        resolvedPath = normalized;
+        return true;
+    }
+
+    private static unsafe bool ModelUsesSkinning(Model model)
+    {
+        if (model.BoneCount > 0)
+            return true;
+
+        for (int i = 0; i < model.MeshCount; i++)
+        {
+            if (model.Meshes[i].BoneCount > 0)
+                return true;
+        }
+
+        return false;
+    }
+
+    private int GetMeshAssetVersion(string resolvedPath)
+    {
+        resolvedPath = NormalizeAssetPath(resolvedPath);
+        return _meshAssetVersions.TryGetValue(resolvedPath, out var version) ? version : 0;
+    }
+
+    private int ComputeConfigurationHash(Entity entity, RigidbodyComponent? rigidbody, ColliderComponent collider, bool isImplicitStatic)
     {
         var hash = new HashCode();
         hash.Add(isImplicitStatic);
@@ -1249,6 +1618,20 @@ internal sealed class PhysicsSystem : IDisposable
         hash.Add(entity.Transform.LocalScale.Y);
         hash.Add(entity.Transform.LocalScale.Z);
         hash.Add(!isImplicitStatic && entity.GetComponent<CharacterControllerComponent>() is { Enabled: true });
+        if (collider is MeshColliderComponent meshCollider)
+        {
+            hash.Add(meshCollider.UseMeshRendererWhenEmpty);
+            hash.Add(meshCollider.MeshPath.Path, StringComparer.OrdinalIgnoreCase);
+
+            if (TryResolveMeshColliderSourcePath(entity, meshCollider, out var resolvedPath, out var usesMeshRendererFallback))
+            {
+                hash.Add(resolvedPath, StringComparer.OrdinalIgnoreCase);
+                hash.Add(usesMeshRendererFallback);
+                hash.Add(GetMeshAssetVersion(resolvedPath));
+                if (usesMeshRendererFallback && entity.GetComponent<MeshRendererComponent>() is { } meshRenderer)
+                    hash.Add(meshRenderer.ModelVersion);
+            }
+        }
         return hash.ToHashCode();
     }
 
@@ -1383,6 +1766,36 @@ internal sealed class PhysicsSystem : IDisposable
 
         FrinkyLog.Warning(message);
     }
+
+    private void ClearMeshColliderWarnings(Guid entityId)
+    {
+        _warnedMeshMissingSource.Remove(entityId);
+        _warnedMeshNoData.Remove(entityId);
+        _warnedMeshSkinned.Remove(entityId);
+        _warnedMeshDynamicUnsupported.Remove(entityId);
+        _warnedMeshCharacterUnsupported.Remove(entityId);
+    }
+
+    private void ReleaseMeshShape(MeshShapeCacheKey cacheKey, TypedIndex shapeIndex)
+    {
+        if (_simulation == null)
+            return;
+
+        if (!_meshShapeCache.TryGetValue(cacheKey, out var entry))
+        {
+            _simulation.Shapes.RemoveAndDispose(shapeIndex, _bufferPool);
+            return;
+        }
+
+        entry.ReferenceCount--;
+        if (entry.ReferenceCount > 0)
+            return;
+
+        _meshShapeCache.Remove(cacheKey);
+        _simulation.Shapes.RemoveAndDispose(entry.ShapeIndex, _bufferPool);
+    }
+
+    private static string NormalizeAssetPath(string path) => path.Replace('\\', '/');
 
     private static bool ApproximatelyEqual(Vector3 a, Vector3 b, float epsilon = 1e-4f)
     {
@@ -2192,6 +2605,7 @@ internal sealed class PhysicsSystem : IDisposable
     private readonly struct ShapeCreationResult
     {
         public required TypedIndex ShapeIndex { get; init; }
+        public MeshShapeCacheKey? SharedMeshShapeKey { get; init; }
         public required BodyInertia DynamicInertia { get; init; }
     }
 
@@ -2226,6 +2640,13 @@ internal sealed class PhysicsSystem : IDisposable
         _warnedCharacterParented.Clear();
         _warnedCharacterNonCapsuleBody.Clear();
         _warnedKinematicDiscontinuity.Clear();
+        _warnedMeshMissingSource.Clear();
+        _warnedMeshNoData.Clear();
+        _warnedMeshSkinned.Clear();
+        _warnedMeshDynamicUnsupported.Clear();
+        _warnedMeshCharacterUnsupported.Clear();
+        _meshShapeCache.Clear();
+        _meshAssetVersions.Clear();
 
         _characterControllers?.Dispose();
         _characterControllers = null;

@@ -23,7 +23,7 @@ public static class PhysicsShortcuts
         }
 
         app.RecordUndo();
-        AddAutoCollider(entity);
+        AddAutoCollider(entity, preferMeshCollider: true);
         app.RefreshUndoBaseline();
         NotificationManager.Instance.Post(
             $"Added static collidable to {entity.Name}", NotificationType.Info, 1.5f);
@@ -64,7 +64,7 @@ public static class PhysicsShortcuts
         app.RecordUndo();
 
         if (!hasCollider)
-            AddAutoCollider(entity);
+            AddAutoCollider(entity, preferMeshCollider: motionType != BodyMotionType.Dynamic);
 
         var rb = hasRigidbody
             ? entity.GetComponent<RigidbodyComponent>()!
@@ -81,8 +81,14 @@ public static class PhysicsShortcuts
     /// Adds a collider whose shape and size are auto-detected from the entity's primitive component.
     /// Falls back to a unit box collider if no primitive is found.
     /// </summary>
-    private static void AddAutoCollider(Entity entity)
+    private static void AddAutoCollider(Entity entity, bool preferMeshCollider)
     {
+        if (preferMeshCollider && entity.GetComponent<MeshRendererComponent>() != null)
+        {
+            entity.AddComponent<MeshColliderComponent>();
+            return;
+        }
+
         // Try to match primitive type to collider shape
         var primitive = entity.GetComponent<PrimitiveComponent>();
 

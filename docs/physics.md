@@ -31,10 +31,13 @@ Scene gravity comes from `Scene.PhysicsSettings.Gravity`. Runtime gravity change
 | `BoxColliderComponent` | `Size` (1,1,1), `Center`, `IsTrigger` |
 | `SphereColliderComponent` | `Radius` (0.5), `Center`, `IsTrigger` |
 | `CapsuleColliderComponent` | `Radius` (0.5), `Length` (1.0), `Center`, `IsTrigger` |
+| `MeshColliderComponent` | `MeshPath`, `UseMeshRendererWhenEmpty`, `Center`, `IsTrigger` |
 
 All colliders support:
 - **Center** offset from the entity origin
 - **IsTrigger** mode for overlap detection without physical response
+
+`MeshColliderComponent` builds a triangle-mesh collider from either its own `MeshPath` override or, when `UseMeshRendererWhenEmpty` is enabled, the sibling `MeshRendererComponent` model. Mesh colliders support collider-only statics, `RigidbodyComponent` statics, and kinematic rigidbodies. Dynamic rigidbodies and skinned/bone-driven model sources are rejected.
 
 ## Triggers
 
@@ -308,7 +311,7 @@ Three presets are available:
 | **Dynamic** | Collider + Rigidbody (Dynamic) — for objects affected by gravity and forces |
 | **Kinematic** | Collider + Rigidbody (Kinematic) — for objects moved by code that push dynamic bodies |
 
-The collider shape is auto-detected from the entity's primitive component:
+The collider shape is auto-detected from the entity's primitive component, except that **Static** and **Kinematic** shortcuts prefer `MeshColliderComponent` when the entity has a `MeshRendererComponent`:
 
 | Primitive | Collider | Auto-sized to |
 |-----------|----------|--------------|
@@ -317,6 +320,11 @@ The collider shape is auto-detected from the entity's primitive component:
 | Cylinder | Capsule Collider | Cylinder radius and height |
 | Plane | Box Collider | Plane width/depth with thin height |
 | None/Other | Box Collider | Default unit size |
+
+For `MeshRendererComponent` entities:
+
+- **Static** and **Kinematic** quick-add create `MeshColliderComponent`
+- **Dynamic** quick-add still falls back to the primitive/default collider path, because dynamic mesh colliders are not supported
 
 Existing colliders and rigidbodies are preserved — the shortcuts skip adding duplicates.
 

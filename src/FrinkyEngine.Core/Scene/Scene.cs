@@ -207,6 +207,16 @@ public class Scene : IDisposable
     }
 
     /// <summary>
+    /// Notifies the active physics scene that one or more asset-backed physics sources changed on disk.
+    /// </summary>
+    /// <param name="relativePaths">Changed asset paths relative to the asset root.</param>
+    public void InvalidatePhysicsAssets(IEnumerable<string> relativePaths)
+    {
+        if (_started)
+            PhysicsSystem?.InvalidateAssets(relativePaths);
+    }
+
+    /// <summary>
     /// Calls <see cref="Component.Start"/> on all components that haven't started yet.
     /// </summary>
     public void Start()

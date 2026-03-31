@@ -737,6 +737,7 @@ public class EditorApplication
                 AssetManager.Instance.InvalidateAsset(rel);
 
             SceneRenderer.InvalidateAssets(relativePaths);
+            CurrentScene.InvalidatePhysicsAssets(relativePaths);
         }
 
         if (changedPrefabs.Count > 0)

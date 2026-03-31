@@ -71,7 +71,7 @@ Build game assemblies from the editor with `File -> Build Scripts` (`Ctrl+B`). T
 
 ## Quick-Add Physics
 
-Right-click an entity in the Hierarchy and select **Add Physics** to quickly add collider and rigidbody components. Three presets are available: **Static Body** (collider only, registered as a static collidable), **Dynamic Body** (collider + dynamic rigidbody), and **Kinematic Body** (collider + kinematic rigidbody). The collider shape and size are auto-detected from the entity's primitive component (Cube, Sphere, Cylinder, or Plane). The same shortcuts are available in the Inspector under **Quick Add Physics**.
+Right-click an entity in the Hierarchy and select **Add Physics** to quickly add collider and rigidbody components. Three presets are available: **Static Body** (collider only, registered as a static collidable), **Dynamic Body** (collider + dynamic rigidbody), and **Kinematic Body** (collider + kinematic rigidbody). The collider shape and size are auto-detected from the entity's primitive component (Cube, Sphere, Cylinder, or Plane). For entities with `MeshRendererComponent`, the **Static Body** and **Kinematic Body** shortcuts prefer `MeshColliderComponent`; **Dynamic Body** still uses the primitive/default fallback because dynamic mesh colliders are not supported. The same shortcuts are available in the Inspector under **Quick Add Physics**.
 
 ## Physics Hitbox Preview
 
@@ -86,6 +86,7 @@ Press `F9` (or use **View -> Collider Edit Mode**) to enter collider edit mode. 
 - Box colliders: drag the scale handles to adjust `Size`, or translate to move the `Center` offset.
 - Sphere colliders: drag any scale handle to uniformly adjust `Radius`, or translate to move `Center`.
 - Capsule colliders: drag scale handles to adjust `Radius` (X/Z) and `Length` (Y), or translate to move `Center`.
+- Mesh colliders show their source-model bounds in the hitbox preview, but collider edit mode does not resize triangle-mesh geometry.
 - The normal entity transform gizmo is replaced by the collider gizmo while this mode is active.
 - Changes are tracked by the undo system.
 

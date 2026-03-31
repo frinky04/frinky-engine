@@ -208,7 +208,8 @@ public static class EditorGizmos
     {
         var rigidbody = entity.GetComponent<RigidbodyComponent>();
         bool parentedRigidbody = rigidbody is { Enabled: true } && entity.Transform.Parent != null;
-        if (parentedRigidbody)
+        bool meshColliderWarning = entity.GetComponent<MeshColliderComponent>() is { Enabled: true } meshCollider && IsMeshColliderWarningState(meshCollider);
+        if (parentedRigidbody || meshColliderWarning)
             return PhysicsHitboxWarningColor;
 
         if (mode == PhysicsHitboxDrawMode.SelectedOnly || selectedIds.Contains(entity.Id))
@@ -321,20 +322,27 @@ public static class EditorGizmos
             case CapsuleColliderComponent capsule:
                 DrawCapsuleColliderFilled(capsule, color);
                 break;
+            case MeshColliderComponent mesh:
+                DrawMeshColliderFilled(mesh, color);
+                break;
         }
     }
 
     private static void DrawBoxColliderFilled(BoxColliderComponent collider, Color color)
     {
-        var transform = collider.Entity.Transform;
+        DrawOrientedBoundsFilled(collider.Entity.Transform, collider.Center, collider.Size, color);
+    }
+
+    private static void DrawOrientedBoundsFilled(TransformComponent transform, Vector3 localCenter, Vector3 localSize, Color color)
+    {
         if (!TryGetWorldBasis(transform, out var position, out var rotation, out var scale))
             return;
 
-        var center = ComputeWorldCenter(collider, position, rotation, scale);
+        var center = ComputeWorldPoint(localCenter, position, rotation, scale);
         var halfExtents = new Vector3(
-            MathF.Max(0.0005f, collider.Size.X * scale.X * 0.5f),
-            MathF.Max(0.0005f, collider.Size.Y * scale.Y * 0.5f),
-            MathF.Max(0.0005f, collider.Size.Z * scale.Z * 0.5f));
+            MathF.Max(0.0005f, localSize.X * scale.X * 0.5f),
+            MathF.Max(0.0005f, localSize.Y * scale.Y * 0.5f),
+            MathF.Max(0.0005f, localSize.Z * scale.Z * 0.5f));
 
         var axisX = Vector3.Normalize(Vector3.Transform(Vector3.UnitX, rotation));
         var axisY = Vector3.Normalize(Vector3.Transform(Vector3.UnitY, rotation));
@@ -404,6 +412,14 @@ public static class EditorGizmos
         Raylib.DrawCylinderEx(bottom, top, radius, radius, 12, color);
     }
 
+    private static void DrawMeshColliderFilled(MeshColliderComponent collider, Color color)
+    {
+        if (!TryGetMeshColliderLocalBounds(collider, out var localCenter, out var localSize))
+            return;
+
+        DrawOrientedBoundsFilled(collider.Entity.Transform, localCenter, localSize, color);
+    }
+
     private static void DrawColliderWireframe(ColliderComponent collider, Color color)
     {
         switch (collider)
@@ -417,20 +433,27 @@ public static class EditorGizmos
             case CapsuleColliderComponent capsule:
                 DrawCapsuleCollider(capsule, color);
                 break;
+            case MeshColliderComponent mesh:
+                DrawMeshCollider(mesh, color);
+                break;
         }
     }
 
     private static void DrawBoxCollider(BoxColliderComponent collider, Color color)
     {
-        var transform = collider.Entity.Transform;
+        DrawOrientedBoundsWireframe(collider.Entity.Transform, collider.Center, collider.Size, color);
+    }
+
+    private static void DrawOrientedBoundsWireframe(TransformComponent transform, Vector3 localCenter, Vector3 localSize, Color color)
+    {
         if (!TryGetWorldBasis(transform, out var position, out var rotation, out var scale))
             return;
 
-        var center = ComputeWorldCenter(collider, position, rotation, scale);
+        var center = ComputeWorldPoint(localCenter, position, rotation, scale);
         var halfExtents = new Vector3(
-            MathF.Max(0.0005f, collider.Size.X * scale.X * 0.5f),
-            MathF.Max(0.0005f, collider.Size.Y * scale.Y * 0.5f),
-            MathF.Max(0.0005f, collider.Size.Z * scale.Z * 0.5f));
+            MathF.Max(0.0005f, localSize.X * scale.X * 0.5f),
+            MathF.Max(0.0005f, localSize.Y * scale.Y * 0.5f),
+            MathF.Max(0.0005f, localSize.Z * scale.Z * 0.5f));
 
         var axisX = Vector3.Normalize(Vector3.Transform(Vector3.UnitX, rotation));
         var axisY = Vector3.Normalize(Vector3.Transform(Vector3.UnitY, rotation));
@@ -506,6 +529,14 @@ public static class EditorGizmos
         Raylib.DrawLine3D(top - forward * radius, bottom - forward * radius, color);
     }
 
+    private static void DrawMeshCollider(MeshColliderComponent collider, Color color)
+    {
+        if (!TryGetMeshColliderLocalBounds(collider, out var localCenter, out var localSize))
+            return;
+
+        DrawOrientedBoundsWireframe(collider.Entity.Transform, localCenter, localSize, color);
+    }
+
     internal static bool TryGetWorldBasis(TransformComponent transform, out Vector3 position, out Quaternion rotation, out Vector3 absScale)
     {
         if (Matrix4x4.Decompose(transform.WorldMatrix, out var scale, out rotation, out position))
@@ -526,11 +557,129 @@ public static class EditorGizmos
 
     internal static Vector3 ComputeWorldCenter(ColliderComponent collider, Vector3 worldPosition, Quaternion worldRotation, Vector3 worldScale)
     {
-        var scaledCenter = new Vector3(
-            collider.Center.X * worldScale.X,
-            collider.Center.Y * worldScale.Y,
-            collider.Center.Z * worldScale.Z);
-        return worldPosition + Vector3.Transform(scaledCenter, worldRotation);
+        return ComputeWorldPoint(collider.Center, worldPosition, worldRotation, worldScale);
+    }
+
+    internal static Vector3 ComputeWorldPoint(Vector3 localPoint, Vector3 worldPosition, Quaternion worldRotation, Vector3 worldScale)
+    {
+        var scaledPoint = new Vector3(
+            localPoint.X * worldScale.X,
+            localPoint.Y * worldScale.Y,
+            localPoint.Z * worldScale.Z);
+        return worldPosition + Vector3.Transform(scaledPoint, worldRotation);
+    }
+
+    internal static bool TryGetMeshColliderModel(MeshColliderComponent collider, out Model model, out Matrix4x4 worldTransform)
+    {
+        model = default;
+        worldTransform = Matrix4x4.Identity;
+
+        if (!TryResolveMeshColliderSourcePath(collider, out var sourcePath))
+            return false;
+
+        model = AssetManager.Instance.LoadModel(sourcePath);
+        worldTransform = Matrix4x4.CreateTranslation(collider.Center) * collider.Entity.Transform.WorldMatrix;
+        return true;
+    }
+
+    internal static bool TryGetMeshColliderLocalBounds(MeshColliderComponent collider, out Vector3 localCenter, out Vector3 localSize)
+    {
+        localCenter = Vector3.Zero;
+        localSize = Vector3.Zero;
+
+        if (!TryGetMeshColliderModel(collider, out var model, out _))
+            return false;
+        if (!TryGetModelLocalBounds(model, out var bounds))
+            return false;
+
+        localCenter = collider.Center + (bounds.Min + bounds.Max) * 0.5f;
+        localSize = bounds.Max - bounds.Min;
+        return true;
+    }
+
+    internal static unsafe bool TryGetModelLocalBounds(Model model, out BoundingBox bounds)
+    {
+        bounds = default;
+        if (model.MeshCount <= 0)
+            return false;
+
+        bool hasBounds = false;
+        Vector3 min = default;
+        Vector3 max = default;
+
+        for (int meshIndex = 0; meshIndex < model.MeshCount; meshIndex++)
+        {
+            var meshBounds = Raylib.GetMeshBoundingBox(model.Meshes[meshIndex]);
+            if (!hasBounds)
+            {
+                min = meshBounds.Min;
+                max = meshBounds.Max;
+                hasBounds = true;
+                continue;
+            }
+
+            min = Vector3.Min(min, meshBounds.Min);
+            max = Vector3.Max(max, meshBounds.Max);
+        }
+
+        if (!hasBounds)
+            return false;
+
+        bounds = new BoundingBox(min, max);
+        return true;
+    }
+
+    private static bool TryResolveMeshColliderSourcePath(MeshColliderComponent collider, out string sourcePath)
+    {
+        sourcePath = string.Empty;
+
+        if (!collider.MeshPath.IsEmpty)
+            return TryResolveModelAssetPath(collider.MeshPath.Path, out sourcePath);
+
+        if (!collider.UseMeshRendererWhenEmpty)
+            return false;
+
+        if (collider.Entity.GetComponent<MeshRendererComponent>() is not { } meshRenderer || meshRenderer.ModelPath.IsEmpty)
+            return false;
+
+        return TryResolveModelAssetPath(meshRenderer.ModelPath.Path, out sourcePath);
+    }
+
+    private static bool TryResolveModelAssetPath(string path, out string resolvedPath)
+    {
+        resolvedPath = string.Empty;
+        if (string.IsNullOrWhiteSpace(path))
+            return false;
+
+        var normalized = (AssetDatabase.Instance.ResolveAssetPath(path) ?? path).Replace('\\', '/');
+        if (!File.Exists(AssetManager.Instance.ResolvePath(normalized)))
+            return false;
+
+        resolvedPath = normalized;
+        return true;
+    }
+
+    private static unsafe bool IsMeshColliderWarningState(MeshColliderComponent collider)
+    {
+        if (collider.Entity.GetComponent<RigidbodyComponent>() is { Enabled: true, MotionType: BodyMotionType.Dynamic })
+            return true;
+
+        if (!TryGetMeshColliderModel(collider, out var model, out _))
+            return true;
+
+        if (model.BoneCount > 0)
+            return true;
+
+        for (int meshIndex = 0; meshIndex < model.MeshCount; meshIndex++)
+        {
+            var mesh = model.Meshes[meshIndex];
+            if (mesh.BoneCount > 0)
+                return true;
+            if (mesh.VertexCount > 0 && mesh.TriangleCount > 0)
+                return false;
+        }
+
+        return true;
     }
 
     private static void DrawEdge(Vector3[] corners, int indexA, int indexB, Color color)

@@ -36,6 +36,7 @@ All built-in components and their key properties. For information on writing cus
 | `BoxColliderComponent` | `Size` (1,1,1), `Center`, `IsTrigger` |
 | `SphereColliderComponent` | `Radius` (0.5), `Center`, `IsTrigger` |
 | `CapsuleColliderComponent` | `Radius` (0.5), `Length` (1.0), `Center`, `IsTrigger` |
+| `MeshColliderComponent` | `MeshPath`, `UseMeshRendererWhenEmpty` (true), `Center`, `IsTrigger` |
 | `CharacterControllerComponent` | `MoveSpeed` (4), `JumpVelocity` (6), `MaxSlopeDegrees` (45), `CrouchHeightScale` (0.5), `CrouchSpeedScale` (0.5), air control settings |
 
 ## Input

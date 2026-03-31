@@ -160,9 +160,32 @@ public class PickingSystem
                 return RaycastCapsule(ray, top, bottom, radius, out distance);
             }
 
+            case MeshColliderComponent meshCollider:
+                return RaycastMeshCollider(ray, meshCollider, out distance);
+
             default:
                 return false;
         }
+    }
+
+    private static unsafe bool RaycastMeshCollider(Ray ray, MeshColliderComponent collider, out float distance)
+    {
+        distance = float.MaxValue;
+        if (!EditorGizmos.TryGetMeshColliderModel(collider, out var model, out var worldTransform))
+            return false;
+
+        bool hit = false;
+        for (int meshIndex = 0; meshIndex < model.MeshCount; meshIndex++)
+        {
+            var collision = Raylib.GetRayCollisionMesh(ray, model.Meshes[meshIndex], worldTransform);
+            if (!collision.Hit || collision.Distance >= distance)
+                continue;
+
+            distance = collision.Distance;
+            hit = true;
+        }
+
+        return hit;
     }
 
     private static bool RaycastBox(Ray ray, Vector3 center, Quaternion rotation, Vector3 absScale, Vector3 size, out float distance)
