@@ -32,68 +32,54 @@ public static class Program
 
     public static void Main(string[] args)
     {
-        if (args.Length > 0 && File.Exists(args[0]) && args[0].EndsWith(".fproject", StringComparison.OrdinalIgnoreCase))
+        var target = RuntimeStartupResolver.ResolveLaunchTarget(args, AppContext.BaseDirectory);
+        if (target.Mode == RuntimeLaunchMode.DevelopmentProject && target.Path != null)
         {
-            RunDevMode(args[0]);
+            RunDevMode(target.Path);
+        }
+        else if (target.Mode == RuntimeLaunchMode.ExportedArchive && target.Path != null)
+        {
+            RunExportedMode(target.Path);
         }
         else
         {
-            var fassetPath = FindFassetNextToExe();
-            if (fassetPath != null)
-            {
-                RunExportedMode(fassetPath);
-            }
-            else
-            {
-                Console.WriteLine("Usage: FrinkyEngine.Runtime <path-to-.fproject>");
-                Console.WriteLine("  Or place a .fasset file next to the executable.");
-            }
+            Console.WriteLine("Usage: FrinkyEngine.Runtime <path-to-.fproject>");
+            Console.WriteLine("  Or place a .fasset file next to the executable.");
         }
     }
 
     private static void RunDevMode(string fprojectPath)
     {
+        var startup = RuntimeStartupResolver.ResolveDevelopmentStartup(fprojectPath, AppContext.BaseDirectory);
+
+        AssetManager.Instance.AssetsPath = startup.AssetsPath;
+        AssetDatabase.Instance.Scan(AssetManager.Instance.AssetsPath);
+        AssetManager.Instance.EngineContentPath = startup.EngineContentPath;
+        AssetDatabase.Instance.ScanEngineContent(startup.EngineContentPath);
         var projectDir = Path.GetDirectoryName(Path.GetFullPath(fprojectPath))!;
         var project = ProjectFile.Load(fprojectPath);
         var settings = ProjectSettings.LoadOrCreate(projectDir, project.ProjectName);
-        var sceneRelativePath = settings.ResolveStartupScene(project.DefaultScene);
-
-        AssetManager.Instance.AssetsPath = project.GetAbsoluteAssetsPath(projectDir);
-        AssetDatabase.Instance.Scan(AssetManager.Instance.AssetsPath);
-
-        var engineContentPath = Path.Combine(AppContext.BaseDirectory, "EngineContent");
-        AssetManager.Instance.EngineContentPath = engineContentPath;
-        AssetDatabase.Instance.ScanEngineContent(engineContentPath);
-
         PhysicsProjectSettings.ApplyFrom(settings.Runtime);
         AudioProjectSettings.ApplyFrom(settings.Runtime);
 
         var assemblyLoader = new GameAssemblyLoader();
-        if (!string.IsNullOrEmpty(project.GameAssembly))
-        {
-            var dllPath = Path.Combine(projectDir, project.GameAssembly);
-            assemblyLoader.LoadAssembly(dllPath);
-        }
-
-        var scenePath = Path.GetFullPath(Path.Combine(AssetManager.Instance.AssetsPath, sceneRelativePath));
-        var windowTitle = string.IsNullOrWhiteSpace(settings.Runtime.WindowTitle)
-            ? project.ProjectName
-            : settings.Runtime.WindowTitle;
+        if (!string.IsNullOrEmpty(startup.GameAssemblyPath))
+            assemblyLoader.LoadAssembly(startup.GameAssemblyPath);
 
         RunGameLoop("Shaders/lighting.vs", "Shaders/lighting.fs",
-            scenePath, assemblyLoader, windowTitle, new RuntimeLaunchSettings
+            startup.ScenePath, assemblyLoader, startup.WindowTitle, new RuntimeLaunchSettings
             {
-                TargetFps = settings.Runtime.TargetFps,
-                VSync = settings.Runtime.VSync,
-                WindowWidth = settings.Runtime.WindowWidth,
-                WindowHeight = settings.Runtime.WindowHeight,
-                Resizable = settings.Runtime.Resizable,
-                Fullscreen = settings.Runtime.Fullscreen,
-                StartMaximized = settings.Runtime.StartMaximized,
-                ForwardPlusTileSize = settings.Runtime.ForwardPlusTileSize,
-                ForwardPlusMaxLights = settings.Runtime.ForwardPlusMaxLights,
-                ForwardPlusMaxLightsPerTile = settings.Runtime.ForwardPlusMaxLightsPerTile,
-                ScreenPercentage = settings.Runtime.ScreenPercentage
+                TargetFps = startup.TargetFps,
+                VSync = startup.VSync,
+                WindowWidth = startup.WindowWidth,
+                WindowHeight = startup.WindowHeight,
+                Resizable = startup.Resizable,
+                Fullscreen = startup.Fullscreen,
+                StartMaximized = startup.StartMaximized,
+                ForwardPlusTileSize = startup.ForwardPlusTileSize,
+                ForwardPlusMaxLights = startup.ForwardPlusMaxLights,
+                ForwardPlusMaxLightsPerTile = startup.ForwardPlusMaxLightsPerTile,
+                ScreenPercentage = startup.ScreenPercentage
             });
     }
 
@@ -105,48 +91,41 @@ public static class Program
         {
             FAssetArchive.ExtractAll(fassetPath, tempDir);
 
-            var manifestJson = File.ReadAllText(Path.Combine(tempDir, "manifest.json"));
-            var manifest = ExportManifest.FromJson(manifestJson);
+            var startup = RuntimeStartupResolver.ResolveExportedStartup(tempDir);
+            var manifest = ExportManifest.FromJson(File.ReadAllText(Path.Combine(tempDir, "manifest.json")));
 
-            AssetManager.Instance.AssetsPath = Path.Combine(tempDir, "Assets");
+            AssetManager.Instance.AssetsPath = startup.AssetsPath;
             AssetDatabase.Instance.Scan(AssetManager.Instance.AssetsPath);
 
-            var engineContentPath = Path.Combine(tempDir, "EngineContent");
-            AssetManager.Instance.EngineContentPath = engineContentPath;
-            AssetDatabase.Instance.ScanEngineContent(engineContentPath);
+            AssetManager.Instance.EngineContentPath = startup.EngineContentPath;
+            AssetDatabase.Instance.ScanEngineContent(startup.EngineContentPath);
 
             PhysicsProjectSettings.ApplyFrom(manifest);
             AudioProjectSettings.ApplyFrom(manifest);
 
             var assemblyLoader = new GameAssemblyLoader();
-            if (!string.IsNullOrEmpty(manifest.GameAssembly))
+            if (!string.IsNullOrEmpty(startup.GameAssemblyPath))
             {
-                var dllPath = Path.Combine(tempDir, manifest.GameAssembly);
-                if (File.Exists(dllPath))
-                    assemblyLoader.LoadAssembly(dllPath);
+                if (File.Exists(startup.GameAssemblyPath))
+                    assemblyLoader.LoadAssembly(startup.GameAssemblyPath);
             }
 
             var shaderVs = Path.Combine(tempDir, "Shaders", "lighting.vs");
             var shaderFs = Path.Combine(tempDir, "Shaders", "lighting.fs");
-            var scenePath = Path.Combine(tempDir, manifest.DefaultScene);
-            var windowTitle = !string.IsNullOrWhiteSpace(manifest.WindowTitle)
-                ? manifest.WindowTitle
-                : (!string.IsNullOrWhiteSpace(manifest.ProductName) ? manifest.ProductName : manifest.ProjectName);
-
-            RunGameLoop(shaderVs, shaderFs, scenePath, assemblyLoader, windowTitle,
+            RunGameLoop(shaderVs, shaderFs, startup.ScenePath, assemblyLoader, startup.WindowTitle,
                 new RuntimeLaunchSettings
                 {
-                    TargetFps = manifest.TargetFps ?? 120,
-                    VSync = manifest.VSync ?? true,
-                    WindowWidth = manifest.WindowWidth ?? 1280,
-                    WindowHeight = manifest.WindowHeight ?? 720,
-                    Resizable = manifest.Resizable ?? true,
-                    Fullscreen = manifest.Fullscreen ?? false,
-                    StartMaximized = manifest.StartMaximized ?? false,
-                    ForwardPlusTileSize = manifest.ForwardPlusTileSize ?? ForwardPlusSettings.DefaultTileSize,
-                    ForwardPlusMaxLights = manifest.ForwardPlusMaxLights ?? ForwardPlusSettings.DefaultMaxLights,
-                    ForwardPlusMaxLightsPerTile = manifest.ForwardPlusMaxLightsPerTile ?? ForwardPlusSettings.DefaultMaxLightsPerTile,
-                    ScreenPercentage = manifest.ScreenPercentage ?? 100
+                    TargetFps = startup.TargetFps,
+                    VSync = startup.VSync,
+                    WindowWidth = startup.WindowWidth,
+                    WindowHeight = startup.WindowHeight,
+                    Resizable = startup.Resizable,
+                    Fullscreen = startup.Fullscreen,
+                    StartMaximized = startup.StartMaximized,
+                    ForwardPlusTileSize = startup.ForwardPlusTileSize,
+                    ForwardPlusMaxLights = startup.ForwardPlusMaxLights,
+                    ForwardPlusMaxLightsPerTile = startup.ForwardPlusMaxLightsPerTile,
+                    ScreenPercentage = startup.ScreenPercentage
                 });
         }
         finally
@@ -357,12 +336,5 @@ public static class Program
             ForwardPlusMaxLightsPerTile = ClampOrDefault(settings.ForwardPlusMaxLightsPerTile, 8, 256, ForwardPlusSettings.DefaultMaxLightsPerTile),
             ScreenPercentage = ClampOrDefault(settings.ScreenPercentage, 10, 200, 100)
         };
-    }
-
-    private static string? FindFassetNextToExe()
-    {
-        var exeDir = AppContext.BaseDirectory;
-        var fassetFiles = Directory.GetFiles(exeDir, "*.fasset");
-        return fassetFiles.Length > 0 ? fassetFiles[0] : null;
     }
 }

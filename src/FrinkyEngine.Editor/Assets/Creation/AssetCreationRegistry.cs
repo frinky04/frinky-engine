@@ -37,4 +37,11 @@ public static class AssetCreationRegistry
         Register(new CanvasAssetCreationFactory());
         _defaultsRegistered = true;
     }
+
+    internal static void ResetForTests()
+    {
+        FactoriesById.Clear();
+        OrderedFactories.Clear();
+        _defaultsRegistered = false;
+    }
 }

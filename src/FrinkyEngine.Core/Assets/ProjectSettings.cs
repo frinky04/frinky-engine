@@ -235,9 +235,10 @@ public class ProjectSettings
         Project.Company = Coalesce(Project.Company, string.Empty);
         Project.Description = CoalesceSingleLine(Project.Description, string.Empty);
 
+        var runtimeWasNull = Runtime == null;
         Runtime ??= new RuntimeProjectSettings();
         Runtime.TargetFps = ClampFpsAllowUncapped(Runtime.TargetFps, 30, 500, 120);
-        Runtime.WindowTitle = Coalesce(Runtime.WindowTitle, safeProjectName);
+        Runtime.WindowTitle = runtimeWasNull ? safeProjectName : Coalesce(Runtime.WindowTitle, safeProjectName);
         Runtime.WindowWidth = Clamp(Runtime.WindowWidth, 320, 10000, 1280);
         Runtime.WindowHeight = Clamp(Runtime.WindowHeight, 200, 10000, 720);
         Runtime.StartupSceneOverride = NormalizeScenePath(Runtime.StartupSceneOverride);
@@ -263,8 +264,9 @@ public class ProjectSettings
         Runtime.AudioDopplerScale = ClampFloat(Runtime.AudioDopplerScale, 0f, 10f, 1f);
         Runtime.ScreenPercentage = Clamp(Runtime.ScreenPercentage, 10, 200, 100);
 
+        var buildWasNull = Build == null;
         Build ??= new BuildProjectSettings();
-        Build.OutputName = Coalesce(Build.OutputName, safeProjectName);
+        Build.OutputName = buildWasNull ? safeProjectName : Coalesce(Build.OutputName, safeProjectName);
         Build.BuildVersion = Coalesce(Build.BuildVersion, Project.Version);
     }
 

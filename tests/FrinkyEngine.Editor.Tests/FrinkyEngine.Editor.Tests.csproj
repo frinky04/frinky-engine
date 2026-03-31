@@ -20,6 +20,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\FrinkyEngine.Editor\FrinkyEngine.Editor.csproj" />
+    <ProjectReference Include="..\..\src\FrinkyEngine.Runtime\FrinkyEngine.Runtime.csproj" />
   </ItemGroup>
 
 </Project>

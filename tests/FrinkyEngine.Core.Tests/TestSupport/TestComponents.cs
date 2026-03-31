@@ -26,6 +26,11 @@ internal sealed class AssetReferenceContainer
     public AssetReference Asset { get; set; } = new(string.Empty);
 }
 
+internal sealed class TestFObject : FObject
+{
+    public override string DisplayName => "Test FObject";
+}
+
 internal sealed class ProbePanel : Panel
 {
     public int CreatedCount { get; private set; }

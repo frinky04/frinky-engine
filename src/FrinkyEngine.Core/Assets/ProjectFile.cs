@@ -79,4 +79,24 @@ public class ProjectFile
     {
         return Path.GetFullPath(Path.Combine(projectDir, AssetsPath, DefaultScene));
     }
+
+    /// <summary>
+    /// Resolves the absolute path to the game's compiled assembly DLL from a project root.
+    /// </summary>
+    /// <param name="projectDir">Absolute path to the project directory.</param>
+    /// <returns>The absolute path to the game assembly DLL.</returns>
+    public string GetAbsoluteGameAssemblyPath(string projectDir)
+    {
+        return Path.GetFullPath(Path.Combine(projectDir, GameAssembly));
+    }
+
+    /// <summary>
+    /// Resolves the absolute path to the game's <c>.csproj</c> file from a project root.
+    /// </summary>
+    /// <param name="projectDir">Absolute path to the project directory.</param>
+    /// <returns>The absolute path to the game project file.</returns>
+    public string GetAbsoluteGameProjectPath(string projectDir)
+    {
+        return Path.GetFullPath(Path.Combine(projectDir, GameProject));
+    }
 }
