@@ -6,13 +6,16 @@ namespace FrinkyEngine.Core.Components;
 
 /// <summary>
 /// Abstract base class for procedurally generated mesh primitives (cubes, spheres, etc.).
-/// Handles mesh generation, material assignment, and automatic rebuilds when properties change.
+/// Primitive geometry is generated into renderer-owned caches instead of being stored on the component.
 /// </summary>
 public abstract class PrimitiveComponent : RenderableComponent
 {
     private Material _material = new();
-    private int _lastMaterialHash;
-    private bool _meshDirty;
+
+    /// <summary>
+    /// Monotonically increasing geometry version incremented whenever primitive shape data changes.
+    /// </summary>
+    internal int GeometryVersion { get; private set; }
 
     /// <summary>
     /// Material configuration for this primitive.
@@ -21,71 +24,63 @@ public abstract class PrimitiveComponent : RenderableComponent
     public Material Material
     {
         get => _material;
-        set { _material = value ?? new Material(); MarkMeshDirty(); }
+        set
+        {
+            _material = value ?? new Material();
+            Invalidate();
+        }
+    }
+
+    /// <summary>
+    /// Creates the procedural mesh for this primitive. Called by renderer-side resource caches.
+    /// </summary>
+    protected internal abstract Mesh CreateMesh();
+
+    /// <summary>
+    /// Flags the primitive geometry as stale.
+    /// </summary>
+    protected void MarkMeshDirty()
+    {
+        Invalidate();
     }
 
     /// <inheritdoc />
     public override void Invalidate()
     {
-        if (RenderModel.HasValue)
-            Raylib.UnloadModel(RenderModel.Value);
-        RenderModel = null;
-        _meshDirty = true;
+        GeometryVersion++;
+        base.Invalidate();
     }
 
-    /// <summary>
-    /// Creates the procedural mesh for this primitive. Subclasses implement this to define their geometry.
-    /// </summary>
-    /// <returns>The generated <see cref="Mesh"/>.</returns>
-    protected abstract Mesh CreateMesh();
-
-    /// <summary>
-    /// Flags the mesh as needing a rebuild, triggering regeneration on the next frame.
-    /// </summary>
-    protected void MarkMeshDirty()
+    internal string GetPrimitiveResourceKey()
     {
-        if (RenderModel.HasValue)
-            RebuildModel();
-        else
-            _meshDirty = true;
-    }
+        var hash = new HashCode();
+        hash.Add(GetType().FullName);
 
-    /// <inheritdoc />
-    public override void Start()
-    {
-        if (!RenderModel.HasValue || _meshDirty)
-            RebuildModel();
-    }
-
-    /// <inheritdoc />
-    public override void OnDestroy()
-    {
-        if (RenderModel.HasValue)
+        switch (this)
         {
-            Raylib.UnloadModel(RenderModel.Value);
-            RenderModel = null;
+            case CubePrimitive cube:
+                hash.Add(BitConverter.SingleToInt32Bits(cube.Width));
+                hash.Add(BitConverter.SingleToInt32Bits(cube.Height));
+                hash.Add(BitConverter.SingleToInt32Bits(cube.Depth));
+                break;
+            case SpherePrimitive sphere:
+                hash.Add(BitConverter.SingleToInt32Bits(sphere.Radius));
+                hash.Add(sphere.Rings);
+                hash.Add(sphere.Slices);
+                break;
+            case PlanePrimitive plane:
+                hash.Add(BitConverter.SingleToInt32Bits(plane.Width));
+                hash.Add(BitConverter.SingleToInt32Bits(plane.Depth));
+                hash.Add(plane.ResolutionX);
+                hash.Add(plane.ResolutionZ);
+                break;
+            case CylinderPrimitive cylinder:
+                hash.Add(BitConverter.SingleToInt32Bits(cylinder.Radius));
+                hash.Add(BitConverter.SingleToInt32Bits(cylinder.Height));
+                hash.Add(cylinder.Slices);
+                break;
         }
-    }
 
-    internal override void EnsureModelReady()
-    {
-        var currentHash = _material.GetConfigurationHash();
-        if (!RenderModel.HasValue || _meshDirty || currentHash != _lastMaterialHash)
-            RebuildModel();
-    }
-
-    internal void RebuildModel()
-    {
-        if (RenderModel.HasValue)
-            Raylib.UnloadModel(RenderModel.Value);
-
-        var mesh = CreateMesh();
-        var model = Raylib.LoadModelFromMesh(mesh);
-
-        MaterialApplicator.ApplyToModel(model, 0, _material);
-
-        RenderModel = model;
-        _meshDirty = false;
-        _lastMaterialHash = _material.GetConfigurationHash();
+        return $"{GetType().FullName}:{hash.ToHashCode():X8}";
     }
 }

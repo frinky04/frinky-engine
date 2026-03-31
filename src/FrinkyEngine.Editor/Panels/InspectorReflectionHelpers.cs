@@ -14,7 +14,7 @@ internal static class InspectorReflectionHelpers
             return false;
         if (prop.GetCustomAttribute<InspectorHiddenAttribute>() != null)
             return false;
-        if (prop.Name is "Entity" or "HasStarted" or "Enabled" or "RenderModel")
+        if (prop.Name is "Entity" or "HasStarted" or "Enabled")
             return false;
         if (prop.CanWrite)
             return true;

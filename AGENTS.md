@@ -54,6 +54,9 @@ When adding a new system or feature, evaluate whether it benefits from console c
 ## API Pitfalls
 
 - **Raylib-cs `Shader.Locs`** is a pointer — use `unsafe`, cache locations in `int` fields
+- **Renderer resource ownership** — components no longer own `RenderModel` state. Mesh/material/skinned-instance lifetimes live in `RenderResourceCache`, and tooling/picking should go through `RenderGeometryQueries` instead of touching Raylib models on components.
+- **Forward+ texture binding workaround** — the Raylib backend still maps light/tile/triplanar sampler uniforms onto Raylib material map slots (`Occlusion`, `Emission`, `Height`, `Brdf`) because `SetShaderValueTexture()` becomes unreliable after `DrawRenderBatchActive()`. Do not reuse those slots casually without auditing backend bindings.
+- **Raylib instanced draw submission** — `Raylib.DrawMeshInstanced()` currently expects an exact-length transform array in this codebase. Reusing a larger capacity-backed buffer caused duplicate mesh/primitive batches to disappear; keep instanced submissions on tightly sized arrays unless that path is revalidated.
 - **Raylib animation math conventions** — for skinning-critical codepaths, prefer `Raymath.MatrixMultiply/MatrixInvert/QuaternionToMatrix/...` over hand-rolled `System.Numerics` composition; matrix order assumptions are easy to get wrong and can cause catastrophic mesh deformation
 - **IK pose spaces** — sample animation, convert to local-space, run IK in local-space, then convert back to model-space for skinning matrix reconstruction; avoid interpolating IK input in model-space
 - **IK activation gating** — only run IK pipeline when at least one solver is truly runnable for the current hierarchy (not merely present/enabled), otherwise stay on the non-IK animation path
@@ -81,6 +84,7 @@ When adding a new system or feature, evaluate whether it benefits from console c
 ## Current Workarounds
 
 - **Asset icon generation cadence** — icon generation is intentionally throttled in `AssetIconService` (`MinJobIntervalSeconds = 0.2`) to keep editor frame impact low; adjust this constant if startup icon warmup speed is preferred over smoother frame pacing.
+- **Renderer graph transition** — `SceneRenderer.RenderView(RenderViewRequest)` is the new extraction/culling/backend path, but editor/runtime post-processing, selection outline composite, upscale, and final UI overlays are still manually orchestrated outside the renderer. Existing `Render()` / `RenderDepthPrePass()` / `RenderSelectionMask()` methods are compatibility shims over the new path until that composition is pulled into the render graph.
 
 ## Editor Keybinds
 

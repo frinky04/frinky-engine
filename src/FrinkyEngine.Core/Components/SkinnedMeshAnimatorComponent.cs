@@ -61,6 +61,7 @@ public sealed unsafe class SkinnedMeshAnimatorComponent : Component
     private Matrix4x4[][]? _poseFrameB;
     private Matrix4x4[][]? _poseLerped;
     private bool _hasSkinnedMeshes;
+    private SkinPaletteHandle _currentSkinPaletteHandle;
 
     // Current model-space bone transforms, updated each PrepareForRender for bone preview.
     private (Vector3 t, Quaternion r, Vector3 s)[]? _currentModelPose;
@@ -184,7 +185,8 @@ public sealed unsafe class SkinnedMeshAnimatorComponent : Component
     {
         Playing = false;
         ResetPlayhead();
-        ApplyBindPose();
+        if (TryGetAnimationModel(out var model, out _))
+            ApplyBindPose(model);
     }
 
     /// <summary>
@@ -315,12 +317,12 @@ public sealed unsafe class SkinnedMeshAnimatorComponent : Component
     /// <inheritdoc />
     public override void OnDestroy()
     {
-        if (_meshRenderer != null)
-            _meshRenderer.SetRequireUniqueModelInstance(false);
     }
 
     internal void PrepareForRender(ulong renderToken)
     {
+        _currentSkinPaletteHandle = default;
+
         if (!Enabled)
             return;
 
@@ -328,26 +330,26 @@ public sealed unsafe class SkinnedMeshAnimatorComponent : Component
         if (_meshRenderer == null)
             return;
 
-        _meshRenderer.SetRequireUniqueModelInstance(true);
-        _meshRenderer.EnsureModelReady();
-        if (!_meshRenderer.RenderModel.HasValue)
+        if (!TryGetAnimationModel(out var model, out var skinPaletteHandle))
             return;
 
-        if (!EnsureAnimationState())
+        if (!EnsureAnimationState(model))
             return;
 
         if (_lastPreparedRenderToken == renderToken)
+        {
+            _currentSkinPaletteHandle = skinPaletteHandle;
             return;
+        }
 
         _lastPreparedRenderToken = renderToken;
-
-        var model = _meshRenderer.RenderModel.Value;
+        _currentSkinPaletteHandle = skinPaletteHandle;
 
         if (!RenderRuntimeCvars.AnimationEnabled)
         {
             // Prevent a large dt jump when animation is re-enabled.
             _lastSampleTime = -1d;
-            ApplyBindPose();
+            ApplyBindPose(model);
             CaptureCurrentModelPose(model);
             return;
         }
@@ -373,7 +375,7 @@ public sealed unsafe class SkinnedMeshAnimatorComponent : Component
             }
             else
             {
-                ApplyBindPose();
+                ApplyBindPose(model);
                 CaptureCurrentModelPose(model);
             }
             return;
@@ -463,19 +465,20 @@ public sealed unsafe class SkinnedMeshAnimatorComponent : Component
             SampleFramePose(model, animation, frameA, _poseFrameA!);
             if (alpha <= 0f || frameA == frameB)
             {
-                ApplyPose(_poseFrameA!);
+                ApplyPose(model, _poseFrameA!);
                 CaptureInterpolatedModelPose(model, animation, frameA, frameA, 0f);
                 return;
             }
 
             SampleFramePose(model, animation, frameB, _poseFrameB!);
             LerpPose(_poseFrameA!, _poseFrameB!, _poseLerped!, alpha);
-            ApplyPose(_poseLerped!);
+            ApplyPose(model, _poseLerped!);
             CaptureInterpolatedModelPose(model, animation, frameA, frameB, alpha);
         }
     }
 
     internal bool UsesSkinning => _hasSkinnedMeshes;
+    internal SkinPaletteHandle CurrentSkinPaletteHandle => _currentSkinPaletteHandle;
 
     /// <summary>
     /// Returns the current model-space bone transforms after animation has been applied.
@@ -489,7 +492,15 @@ public sealed unsafe class SkinnedMeshAnimatorComponent : Component
 
     private bool EnsureAnimationState()
     {
-        if (_meshRenderer == null || !_meshRenderer.RenderModel.HasValue)
+        if (!TryGetAnimationModel(out var model, out _))
+            return false;
+
+        return EnsureAnimationState(model);
+    }
+
+    private bool EnsureAnimationState(Model model)
+    {
+        if (_meshRenderer == null)
             return false;
 
         bool modelChanged = _meshRenderer.ModelVersion != _lastModelVersion;
@@ -505,7 +516,7 @@ public sealed unsafe class SkinnedMeshAnimatorComponent : Component
 
             if (UseMultiSource)
             {
-                RebuildAggregatedClips();
+                RebuildAggregatedClips(model);
             }
             else
             {
@@ -520,7 +531,6 @@ public sealed unsafe class SkinnedMeshAnimatorComponent : Component
             _playbackInitialized = false;
         }
 
-        var model = _meshRenderer.RenderModel.Value;
         if (!PoseShapeMatchesModel(model))
             ResetPoseBuffersOnly();
         CaptureBindPoseIfNeeded(model);
@@ -559,18 +569,16 @@ public sealed unsafe class SkinnedMeshAnimatorComponent : Component
         if (clip < 0 && ikComponent != null && ikComponent.HasRunnableSolvers(model))
             return true;
 
-        ApplyBindPose();
+        ApplyBindPose(model);
         return false;
     }
 
-    private void RebuildAggregatedClips()
+    private void RebuildAggregatedClips(Model model)
     {
         _aggregatedClips.Clear();
 
-        if (_meshRenderer == null || !_meshRenderer.RenderModel.HasValue)
+        if (_meshRenderer == null)
             return;
-
-        var model = _meshRenderer.RenderModel.Value;
         var usedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         // Load embedded animations from the mesh file first
@@ -818,20 +826,16 @@ public sealed unsafe class SkinnedMeshAnimatorComponent : Component
         }
     }
 
-    private void ApplyBindPose()
+    private void ApplyBindPose(Model model)
     {
         if (_bindPose == null)
             return;
 
-        ApplyPose(_bindPose);
+        ApplyPose(model, _bindPose);
     }
 
-    private void ApplyPose(Matrix4x4[][] pose)
+    private static void ApplyPose(Model model, Matrix4x4[][] pose)
     {
-        if (_meshRenderer == null || !_meshRenderer.RenderModel.HasValue)
-            return;
-
-        var model = _meshRenderer.RenderModel.Value;
         unsafe
         {
             for (int i = 0; i < model.MeshCount && i < pose.Length; i++)
@@ -1010,9 +1014,6 @@ public sealed unsafe class SkinnedMeshAnimatorComponent : Component
         Model model,
         (Vector3 t, Quaternion r, Vector3 s)[] modelPose)
     {
-        if (_meshRenderer == null || !_meshRenderer.RenderModel.HasValue)
-            return;
-
         int boneCount = model.BoneCount;
         int firstMeshWithBones = -1;
         for (int i = 0; i < model.MeshCount; i++)
@@ -1168,6 +1169,7 @@ public sealed unsafe class SkinnedMeshAnimatorComponent : Component
         _ikWorldMatrices = null;
         _hasSkinnedMeshes = false;
         _currentModelPose = null;
+        _currentSkinPaletteHandle = default;
     }
 
     private void ResetPlayhead()
@@ -1217,6 +1219,21 @@ public sealed unsafe class SkinnedMeshAnimatorComponent : Component
         for (int i = 0; i < _animationCount; i++)
             result[i + 1] = GetAnimationName(i);
         return result;
+    }
+
+    private bool TryGetAnimationModel(out Model model, out SkinPaletteHandle skinPaletteHandle)
+    {
+        model = default;
+        skinPaletteHandle = default;
+
+        if (_meshRenderer == null)
+            return false;
+
+        var queries = RenderGeometryQueries.Current;
+        if (queries == null)
+            return false;
+
+        return queries.TryGetAnimationModel(_meshRenderer, out model, out skinPaletteHandle);
     }
 
     /// <summary>

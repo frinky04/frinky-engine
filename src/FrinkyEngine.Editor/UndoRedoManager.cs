@@ -166,10 +166,9 @@ public class UndoRedoManager
     }
 
     /// <summary>
-    /// Transfers loaded model instances and initialized post-process effects from the
-    /// old scene to the restored scene, matching entities by ID and components by type.
-    /// This prevents undo/redo from triggering full model reloads from disk and shader
-    /// recompilations for post-process effects.
+    /// Transfers initialized post-process effects from the old scene to the restored scene,
+    /// matching entities by ID and components by type. Renderer-owned mesh resources are
+    /// rebuilt by the scene renderer instead of being copied through components.
     /// </summary>
     private static void TransferLoadedAssets(Core.Scene.Scene oldScene, Core.Scene.Scene restoredScene)
     {
@@ -183,16 +182,6 @@ public class UndoRedoManager
         {
             if (!oldEntities.TryGetValue(entity.Id, out var oldEntity))
                 continue;
-
-            // Transfer unique model instances for skinned meshes
-            var newMesh = entity.GetComponent<MeshRendererComponent>();
-            var oldMesh = oldEntity.GetComponent<MeshRendererComponent>();
-            if (newMesh != null && oldMesh != null && oldMesh.HasLoadedModel
-                && string.Equals(newMesh.ModelPath.Path, oldMesh.ModelPath.Path, StringComparison.OrdinalIgnoreCase)
-                && !string.IsNullOrEmpty(newMesh.ModelPath.Path))
-            {
-                newMesh.TransferModelFrom(oldMesh);
-            }
 
             // Transfer initialized post-process effects to avoid shader recompilation
             var newStack = entity.GetComponent<PostProcessStackComponent>();

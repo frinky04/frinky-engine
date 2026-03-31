@@ -22,6 +22,12 @@ public class TransformComponent : Component
     private bool _eulerDirty = true;
 
     /// <summary>
+    /// Monotonically increasing version incremented whenever this transform changes.
+    /// Used by renderer-side world-bounds caches.
+    /// </summary>
+    public int TransformVersion { get; private set; }
+
+    /// <summary>
     /// Position relative to the parent transform (or world origin if no parent).
     /// </summary>
     [InspectorLabel("Position")]
@@ -29,7 +35,13 @@ public class TransformComponent : Component
     public Vector3 LocalPosition
     {
         get => _localPosition;
-        set => _localPosition = value;
+        set
+        {
+            if (_localPosition == value)
+                return;
+            _localPosition = value;
+            TransformVersion++;
+        }
     }
 
     /// <summary>
@@ -41,8 +53,11 @@ public class TransformComponent : Component
         get => _localRotation;
         set
         {
+            if (_localRotation == value)
+                return;
             _localRotation = value;
             _eulerDirty = true;
+            TransformVersion++;
         }
     }
 
@@ -54,7 +69,13 @@ public class TransformComponent : Component
     public Vector3 LocalScale
     {
         get => _localScale;
-        set => _localScale = value;
+        set
+        {
+            if (_localScale == value)
+                return;
+            _localScale = value;
+            TransformVersion++;
+        }
     }
 
     /// <summary>
@@ -75,9 +96,12 @@ public class TransformComponent : Component
         }
         set
         {
+            if (_cachedEuler == value && !_eulerDirty)
+                return;
             _cachedEuler = value;
             _eulerDirty = false;
             _localRotation = EulerToQuaternion(value);
+            TransformVersion++;
         }
     }
 
@@ -115,6 +139,7 @@ public class TransformComponent : Component
             {
                 _localPosition = value;
             }
+            TransformVersion++;
         }
     }
 
@@ -210,6 +235,7 @@ public class TransformComponent : Component
                 _localRotation = Quaternion.Normalize(value);
             }
             _eulerDirty = true;
+            TransformVersion++;
         }
     }
 
@@ -228,6 +254,7 @@ public class TransformComponent : Component
         _parent?.RemoveChildInternal(this);
         _parent = newParent;
         _parent?.AddChildInternal(this);
+        TransformVersion++;
     }
 
     private bool IsAncestorOf(TransformComponent other)

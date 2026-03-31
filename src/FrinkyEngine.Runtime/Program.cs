@@ -281,9 +281,14 @@ public static class Program
                 sceneRenderer.Render(scene, camera3D, sceneRT, isEditorMode: false);
             }
 
+            // TODO: Route runtime post-processing and final UI composite through SceneRenderer once the render graph owns the full frame.
             Texture2D blitTex;
             if (hasPostProcess)
             {
+                var depthTexture = sceneRT.Depth;
+                if (sceneRenderer.TryGetLastViewRenderTexture(out var sceneViewTarget) && sceneViewTarget.Depth.Id != 0)
+                    depthTexture = sceneViewTarget.Depth;
+
                 blitTex = postProcessPipeline.Execute(
                     ppStack!,
                     sceneRT.Texture,
@@ -293,7 +298,7 @@ public static class Program
                     scene,
                     scaledW, scaledH,
                     isEditorMode: false,
-                    sceneRT.Depth);
+                    depthTexture);
             }
             else
             {

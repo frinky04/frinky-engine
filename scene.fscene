@@ -1,0 +1,175 @@
+{
+  "name": "Untitled",
+  "editorCameraPosition": {
+    "x": 2.8502367,
+    "y": 3.86367,
+    "z": 4.4839954
+  },
+  "editorCameraYaw": -109.3502,
+  "editorCameraPitch": -33.45,
+  "physics": {
+    "gravity": {
+      "x": 0,
+      "y": -9.81,
+      "z": 0
+    }
+  },
+  "entities": [
+    {
+      "name": "Main Camera",
+      "id": "67d3cd93-af06-4ddf-acfd-a36957b3d69e",
+      "active": true,
+      "prefab": null,
+      "components": [
+        {
+          "$type": "FrinkyEngine.Core.Components.TransformComponent",
+          "enabled": true,
+          "editorOnly": false,
+          "properties": {
+            "TransformVersion": 2,
+            "LocalPosition": {
+              "x": 0,
+              "y": 5,
+              "z": 10
+            },
+            "LocalRotation": {
+              "x": -0.17364818,
+              "y": 0,
+              "z": 0,
+              "w": 0.9848077
+            },
+            "LocalScale": {
+              "x": 1,
+              "y": 1,
+              "z": 1
+            }
+          }
+        },
+        {
+          "$type": "FrinkyEngine.Core.Components.CameraComponent",
+          "enabled": true,
+          "editorOnly": false,
+          "properties": {
+            "FieldOfView": 60,
+            "NearPlane": 0.1,
+            "FarPlane": 1000,
+            "Projection": "Perspective",
+            "ClearColor": {
+              "r": 30,
+              "g": 30,
+              "b": 30,
+              "a": 255
+            },
+            "IsMain": true
+          }
+        }
+      ],
+      "children": []
+    },
+    {
+      "name": "Directional Light",
+      "id": "db4cef1d-735e-4fff-a53b-eff59a624e03",
+      "active": true,
+      "prefab": null,
+      "components": [
+        {
+          "$type": "FrinkyEngine.Core.Components.TransformComponent",
+          "enabled": true,
+          "editorOnly": false,
+          "properties": {
+            "TransformVersion": 1,
+            "LocalPosition": {
+              "x": 2,
+              "y": 10,
+              "z": 2
+            },
+            "LocalRotation": {
+              "x": 0,
+              "y": 0,
+              "z": 0,
+              "w": 1
+            },
+            "LocalScale": {
+              "x": 1,
+              "y": 1,
+              "z": 1
+            }
+          }
+        },
+        {
+          "$type": "FrinkyEngine.Core.Components.LightComponent",
+          "enabled": true,
+          "editorOnly": false,
+          "properties": {
+            "LightType": "Directional",
+            "LightColor": {
+              "r": 255,
+              "g": 255,
+              "b": 255,
+              "a": 255
+            },
+            "Intensity": 1,
+            "Range": 10
+          }
+        }
+      ],
+      "children": []
+    },
+    {
+      "name": "Cube",
+      "id": "18dcf911-5022-416b-9039-734879db9478",
+      "active": true,
+      "prefab": null,
+      "components": [
+        {
+          "$type": "FrinkyEngine.Core.Components.TransformComponent",
+          "enabled": true,
+          "editorOnly": false,
+          "properties": {
+            "TransformVersion": 0,
+            "LocalPosition": {
+              "x": 0,
+              "y": 0,
+              "z": 0
+            },
+            "LocalRotation": {
+              "x": 0,
+              "y": 0,
+              "z": 0,
+              "w": 1
+            },
+            "LocalScale": {
+              "x": 1,
+              "y": 1,
+              "z": 1
+            }
+          }
+        },
+        {
+          "$type": "FrinkyEngine.Core.Components.CubePrimitive",
+          "enabled": true,
+          "editorOnly": false,
+          "properties": {
+            "Width": 1,
+            "Height": 1,
+            "Depth": 1.7,
+            "Material": {
+              "tint": {
+                "r": 255,
+                "g": 255,
+                "b": 255,
+                "a": 255
+              },
+              "materialType": "SolidColor",
+              "texturePath": "",
+              "triplanarScale": 1,
+              "triplanarBlendSharpness": 4,
+              "triplanarUseWorldSpace": true
+            }
+          }
+        }
+      ],
+      "children": []
+    }
+  ]
+}

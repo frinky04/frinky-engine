@@ -13,7 +13,7 @@ public static class AssetReferenceValidator
     private static readonly HashSet<string> ExcludedProperties = new()
     {
         "Entity", "HasStarted", "Enabled", "EditorOnly",
-        "EulerAngles", "WorldPosition", "WorldRotation", "RenderModel"
+        "EulerAngles", "WorldPosition", "WorldRotation"
     };
 
     /// <summary>

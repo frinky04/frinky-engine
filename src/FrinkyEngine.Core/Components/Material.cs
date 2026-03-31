@@ -61,6 +61,22 @@ public class Material
     internal int GetConfigurationHash()
         => HashCode.Combine(MaterialType, TexturePath.Path, TriplanarScale, TriplanarBlendSharpness, TriplanarUseWorldSpace, Tint);
 
+    /// <summary>
+    /// Creates a shallow data clone of this material configuration.
+    /// </summary>
+    internal Material Clone()
+    {
+        return new Material
+        {
+            Tint = Tint,
+            MaterialType = MaterialType,
+            TexturePath = TexturePath,
+            TriplanarScale = TriplanarScale,
+            TriplanarBlendSharpness = TriplanarBlendSharpness,
+            TriplanarUseWorldSpace = TriplanarUseWorldSpace
+        };
+    }
+
     private bool UsesTexturedMaterial()
     {
         return MaterialType is MaterialType.Textured or MaterialType.TriplanarTexture;

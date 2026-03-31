@@ -1,106 +1,43 @@
 using System.Numerics;
-using FrinkyEngine.Core.Assets;
 using FrinkyEngine.Core.Components;
 using FrinkyEngine.Core.ECS;
-using FrinkyEngine.Core.Rendering.Profiling;
 using Raylib_cs;
 
 namespace FrinkyEngine.Core.Rendering;
 
 /// <summary>
-/// Renders scenes using a Forward+ tiled lighting pipeline with support for multiple light types.
+/// Public renderer facade that extracts frame data, computes visibility, and delegates submission to the active backend.
 /// </summary>
-public class SceneRenderer
+public sealed class SceneRenderer : IDisposable
 {
-    private const int LightTexelsPerLight = 4;
-    private const int PackedTextureMaxWidth = 1024;
-    private const int ForwardPlusWarningLogIntervalFrames = 180;
-    private const float MinPerspectiveDepth = 0.01f;
+    private readonly RenderResourceCache _resources;
+    private readonly RenderExtraction _extraction;
+    private readonly RenderVisibility _visibility = new();
+    private readonly IRenderBackend _backend;
 
-    private Shader _lightingShader;
-    private bool _shaderLoaded;
-    private Shader _selectionMaskShader;
-    private bool _selectionMaskShaderLoaded;
-
-    private int _ambientLoc = -1;
-    private int _viewPosLoc = -1;
-    private int _screenSizeLoc = -1;
-    private int _tileCountLoc = -1;
-    private int _tileSizeLoc = -1;
-    private int _totalLightsLoc = -1;
-    private int _lightDataTexLoc = -1;
-    private int _tileHeaderTexLoc = -1;
-    private int _tileIndexTexLoc = -1;
-    private int _triplanarParamsTexLoc = -1;
-    private int _lightDataTexSizeLoc = -1;
-    private int _tileHeaderTexSizeLoc = -1;
-    private int _tileIndexTexSizeLoc = -1;
-    private int _lightingUseInstancingLoc = -1;
-    private int _lightingUseSkinningLoc = -1;
-
-    private ForwardPlusSettings _forwardPlusSettings = ForwardPlusSettings.Default;
-    private int _viewportWidth;
-    private int _viewportHeight;
-    private int _tileCountX;
-    private int _tileCountY;
-    private int _tileCount;
-
-    private Texture2D _lightDataTexture;
-    private Texture2D _tileHeaderTexture;
-    private Texture2D _tileIndexTexture;
-
-    private int _lightDataEntries;
-    private int _tileHeaderEntries;
-    private int _tileIndexEntries;
-    private int _lightDataTexWidth;
-    private int _lightDataTexHeight;
-    private int _tileHeaderTexWidth;
-    private int _tileHeaderTexHeight;
-    private int _tileIndexTexWidth;
-    private int _tileIndexTexHeight;
-
-    private float[] _lightDataBuffer = Array.Empty<float>();
-    private float[] _tileHeaderBuffer = Array.Empty<float>();
-    private float[] _tileIndexBuffer = Array.Empty<float>();
-    private int[] _tileLightCounts = Array.Empty<int>();
-    private float[] _tileLightScores = Array.Empty<float>();
-
-    private readonly List<PackedLight> _frameLights = new();
-    private readonly List<PointLightCandidate> _pointCandidates = new();
-    private readonly Dictionary<RenderBatchKey, InstancedBatchBucket> _instancedBatches = new();
-    private readonly List<RenderableDrawItem> _instancingFallbackDraws = new();
-    private readonly Dictionary<uint, int> _useInstancingLocationCache = new();
-    private readonly Dictionary<uint, int> _useSkinningLocationCache = new();
-    private readonly Dictionary<uint, int> _instanceTransformAttribLocationCache = new();
-    private int _frameDrawCallCount;
-    private int _frameSkinnedMeshCount;
-    private ulong _animationFrameToken;
-    private int _lastAutoInstancingBatchCount;
-    private int _lastAutoInstancingInstancedBatchCount;
-    private int _lastAutoInstancingInstancedInstanceCount;
-    private int _lastAutoInstancingFallbackDrawCount;
-    private int _lastAutoInstancingInstancedMeshDrawCallCount;
-    private int _forwardPlusDroppedTileLights;
-    private int _forwardPlusClippedLights;
-    private int _frameCounter;
-    private int _lastSceneLightCount;
-    private int _lastVisibleLightCount;
-    private int _lastSkylightCount;
-    private int _lastDirectionalLightCount;
-    private int _lastPointLightCount;
-    private float _lastAverageLightsPerTile;
-    private int _lastMaxLightsPerTile;
-    private bool _lastStatsValid;
+    public SceneRenderer()
+    {
+        _resources = new RenderResourceCache();
+        _extraction = new RenderExtraction(_resources);
+        _backend = new RaylibRenderBackend(_resources);
+    }
 
     /// <summary>
-    /// Number of draw calls issued in the most recent <see cref="Render"/> pass.
+    /// Number of draw calls issued in the most recent render pass.
     /// </summary>
-    public int LastFrameDrawCallCount { get; private set; }
+    public int LastFrameDrawCallCount => _backend.LastFrameDrawCallCount;
 
     /// <summary>
-    /// Number of skinned meshes that had GPU skinning prepared in the most recent <see cref="Render"/> pass.
+    /// Number of skinned meshes rendered in the most recent render pass.
     /// </summary>
-    public int LastFrameSkinnedMeshCount { get; private set; }
+    public int LastFrameSkinnedMeshCount => _backend.LastFrameSkinnedMeshCount;
+
+    /// <summary>
+    /// Structured diagnostics from the most recent view render.
+    /// </summary>
+    public RenderDiagnostics LastViewDiagnostics { get; private set; }
+
+    private RenderViewResult? _lastViewResult;
 
     /// <summary>
     /// Diagnostic statistics from the most recent automatic instancing frame.
@@ -134,1312 +71,209 @@ public class SceneRenderer
         float AverageLightsPerTile,
         int PeakLightsPerTile);
 
-    /// <summary>
-    /// Gets diagnostic statistics from the most recent Forward+ render pass.
-    /// </summary>
-    /// <returns>A snapshot of the current frame's lighting statistics.</returns>
-    public ForwardPlusFrameStats GetForwardPlusFrameStats()
+    public void Dispose()
     {
-        return new ForwardPlusFrameStats(
-            _lastStatsValid,
-            _lastSceneLightCount,
-            _lastVisibleLightCount,
-            _lastSkylightCount,
-            _lastDirectionalLightCount,
-            _lastPointLightCount,
-            _frameLights.Count,
-            _forwardPlusClippedLights,
-            _forwardPlusDroppedTileLights,
-            _forwardPlusSettings.TileSize,
-            _tileCountX,
-            _tileCountY,
-            _forwardPlusSettings.MaxLights,
-            _forwardPlusSettings.MaxLightsPerTile,
-            _lastAverageLightsPerTile,
-            _lastMaxLightsPerTile);
+        _backend.Dispose();
+        _resources.Dispose();
     }
 
     /// <summary>
-    /// Gets automatic instancing diagnostics from the most recent <see cref="Render"/> pass.
+    /// Loads the renderer shader set.
     /// </summary>
-    /// <returns>A snapshot of batching and instanced submission counts for the frame.</returns>
-    public AutoInstancingFrameStats GetAutoInstancingFrameStats()
-    {
-        return new AutoInstancingFrameStats(
-            RenderRuntimeCvars.AutoInstancingEnabled,
-            _lastAutoInstancingBatchCount,
-            _lastAutoInstancingInstancedBatchCount,
-            _lastAutoInstancingInstancedInstanceCount,
-            _lastAutoInstancingFallbackDrawCount,
-            _lastAutoInstancingInstancedMeshDrawCallCount);
-    }
+    public void LoadShader(string vsPath, string fsPath) => _backend.LoadShader(vsPath, fsPath);
 
     /// <summary>
-    /// Applies new Forward+ configuration settings, reallocating tile buffers if needed.
+    /// Releases renderer shader resources.
     /// </summary>
-    /// <param name="settings">The new settings to apply (values will be normalized/clamped).</param>
-    public void ConfigureForwardPlus(ForwardPlusSettings settings)
-    {
-        var normalized = settings.Normalize();
-        if (normalized == _forwardPlusSettings)
-            return;
-
-        _forwardPlusSettings = normalized;
-        _tileCountX = 0;
-        _tileCountY = 0;
-        _tileCount = 0;
-        _lightDataEntries = 0;
-        _tileHeaderEntries = 0;
-        _tileIndexEntries = 0;
-    }
+    public void UnloadShader() => _backend.UnloadShader();
 
     /// <summary>
-    /// Loads the lighting shader from vertex and fragment shader files.
+    /// Applies Forward+ lighting settings.
     /// </summary>
-    /// <param name="vsPath">Path to the vertex shader file.</param>
-    /// <param name="fsPath">Path to the fragment shader file.</param>
-    public void LoadShader(string vsPath, string fsPath)
-    {
-        _lightingShader = Raylib.LoadShader(vsPath, fsPath);
-        _viewPosLoc = Raylib.GetShaderLocation(_lightingShader, "viewPos");
-        _ambientLoc = Raylib.GetShaderLocation(_lightingShader, "ambient");
-        _screenSizeLoc = Raylib.GetShaderLocation(_lightingShader, "screenSize");
-        _tileCountLoc = Raylib.GetShaderLocation(_lightingShader, "tileCount");
-        _tileSizeLoc = Raylib.GetShaderLocation(_lightingShader, "tileSize");
-        _totalLightsLoc = Raylib.GetShaderLocation(_lightingShader, "totalLights");
-        _lightDataTexLoc = Raylib.GetShaderLocation(_lightingShader, "lightDataTex");
-        _tileHeaderTexLoc = Raylib.GetShaderLocation(_lightingShader, "tileHeaderTex");
-        _tileIndexTexLoc = Raylib.GetShaderLocation(_lightingShader, "tileIndexTex");
-        _triplanarParamsTexLoc = Raylib.GetShaderLocation(_lightingShader, "triplanarParamsTex");
-        _lightDataTexSizeLoc = Raylib.GetShaderLocation(_lightingShader, "lightDataTexSize");
-        _tileHeaderTexSizeLoc = Raylib.GetShaderLocation(_lightingShader, "tileHeaderTexSize");
-        _tileIndexTexSizeLoc = Raylib.GetShaderLocation(_lightingShader, "tileIndexTexSize");
-        _lightingUseInstancingLoc = Raylib.GetShaderLocation(_lightingShader, "useInstancing");
-        _lightingUseSkinningLoc = Raylib.GetShaderLocation(_lightingShader, "useSkinning");
-
-        // Map forward+ sampler uniforms to unused material map slots so DrawMesh
-        // binds them reliably (SetShaderValueTexture uses activeTextureId which
-        // gets cleared by DrawRenderBatchActive, causing texture unit mismatches).
-        unsafe
-        {
-            _lightingShader.Locs[(int)ShaderLocationIndex.MapOcclusion] = _lightDataTexLoc;
-            _lightingShader.Locs[(int)ShaderLocationIndex.MapEmission] = _tileHeaderTexLoc;
-            _lightingShader.Locs[(int)ShaderLocationIndex.MapHeight] = _tileIndexTexLoc;
-            _lightingShader.Locs[(int)ShaderLocationIndex.MapBrdf] = _triplanarParamsTexLoc;
-            _lightingShader.Locs[(int)ShaderLocationIndex.BoneMatrices] = Raylib.GetShaderLocation(_lightingShader, "boneMatrices");
-            _lightingShader.Locs[(int)ShaderLocationIndex.VertexBoneIds] = Raylib.GetShaderLocationAttrib(_lightingShader, "vertexBoneIds");
-            _lightingShader.Locs[(int)ShaderLocationIndex.VertexBoneWeights] = Raylib.GetShaderLocationAttrib(_lightingShader, "vertexBoneWeights");
-        }
-
-        var ambOvr = RenderRuntimeCvars.AmbientOverride;
-        float[] ambient = ambOvr.HasValue
-            ? new[] { ambOvr.Value.X, ambOvr.Value.Y, ambOvr.Value.Z, 1.0f }
-            : new[] { 0.15f, 0.15f, 0.15f, 1.0f };
-        Raylib.SetShaderValue(_lightingShader, _ambientLoc, ambient, ShaderUniformDataType.Vec4);
-
-        _shaderLoaded = true;
-        SetShaderBool(_lightingShader, _lightingUseInstancingLoc, false);
-        SetShaderBool(_lightingShader, _lightingUseSkinningLoc, false);
-
-        var shaderDir = Path.GetDirectoryName(vsPath) ?? "Shaders";
-        var selectionMaskVsPath = Path.Combine(shaderDir, "selection_mask.vs");
-        var selectionMaskFsPath = Path.Combine(shaderDir, "selection_mask.fs");
-
-        if (File.Exists(selectionMaskVsPath) && File.Exists(selectionMaskFsPath))
-        {
-            _selectionMaskShader = Raylib.LoadShader(selectionMaskVsPath, selectionMaskFsPath);
-            unsafe
-            {
-                _selectionMaskShader.Locs[(int)ShaderLocationIndex.BoneMatrices] = Raylib.GetShaderLocation(_selectionMaskShader, "boneMatrices");
-                _selectionMaskShader.Locs[(int)ShaderLocationIndex.VertexBoneIds] = Raylib.GetShaderLocationAttrib(_selectionMaskShader, "vertexBoneIds");
-                _selectionMaskShader.Locs[(int)ShaderLocationIndex.VertexBoneWeights] = Raylib.GetShaderLocationAttrib(_selectionMaskShader, "vertexBoneWeights");
-            }
-            _selectionMaskShaderLoaded = true;
-        }
-    }
+    public void ConfigureForwardPlus(ForwardPlusSettings settings) => _backend.ConfigureForwardPlus(settings);
 
     /// <summary>
-    /// Unloads all shaders and releases Forward+ GPU textures.
+    /// Invalidates cached render resources for the supplied asset-relative paths.
     /// </summary>
-    public void UnloadShader()
-    {
-        ReleaseForwardPlusTextures();
-
-        if (_shaderLoaded)
-        {
-            Raylib.UnloadShader(_lightingShader);
-            _shaderLoaded = false;
-        }
-
-        if (_selectionMaskShaderLoaded)
-        {
-            Raylib.UnloadShader(_selectionMaskShader);
-            _selectionMaskShaderLoaded = false;
-        }
-
-        _useInstancingLocationCache.Clear();
-        _useSkinningLocationCache.Clear();
-        _instanceTransformAttribLocationCache.Clear();
-    }
+    public void InvalidateAssets(IEnumerable<string> relativePaths) => _resources.InvalidateAssets(relativePaths);
 
     /// <summary>
-    /// Renders the scene from the given camera, optionally into a render texture.
+    /// Renders a scene view using the backend-neutral request model.
     /// </summary>
-    /// <param name="scene">The scene to render.</param>
-    /// <param name="camera">The camera viewpoint.</param>
-    /// <param name="renderTarget">Optional render texture target (renders to screen if <c>null</c>).</param>
-    /// <param name="postSceneRender">Optional callback invoked after 3D drawing but before EndMode3D.</param>
-    /// <param name="isEditorMode">When <c>true</c>, editor-only objects and the grid are drawn.</param>
-    public void Render(Scene.Scene scene, Camera3D camera, RenderTexture2D? renderTarget = null, Action? postSceneRender = null, bool isEditorMode = true)
+    public RenderViewResult RenderView(RenderViewRequest request)
     {
-        _animationFrameToken++;
-        _frameDrawCallCount = 0;
-        _frameSkinnedMeshCount = 0;
-        _lastAutoInstancingBatchCount = 0;
-        _lastAutoInstancingInstancedBatchCount = 0;
-        _lastAutoInstancingInstancedInstanceCount = 0;
-        _lastAutoInstancingFallbackDrawCount = 0;
-        _lastAutoInstancingInstancedMeshDrawCallCount = 0;
+        var frame = _extraction.Extract(request.Scene, request.IsEditorMode);
+        var visibleSet = _visibility.Cull(frame, request);
+        var result = _backend.RenderView(frame, visibleSet, request);
 
-        if (renderTarget.HasValue)
-            Raylib.BeginTextureMode(renderTarget.Value);
-
-        var mainCam = scene.MainCamera;
-        Color clearColor = mainCam != null ? mainCam.ClearColor : new Color(30, 30, 30, 255);
-        Raylib.ClearBackground(clearColor);
-
-        Raylib.BeginMode3D(camera);
-
-        if (_shaderLoaded)
+        // TODO: Move post-processing, outline composition, and final UI composite into the renderer graph.
+        if (request.ComposeFinalOverlay != null && _backend.TryGetRenderTexture(result.FinalTarget, out var target))
         {
-            float[] cameraPos = { camera.Position.X, camera.Position.Y, camera.Position.Z };
-            Raylib.SetShaderValue(_lightingShader, _viewPosLoc, cameraPos, ShaderUniformDataType.Vec3);
-
-            var viewportWidth = renderTarget?.Texture.Width ?? Raylib.GetScreenWidth();
-            var viewportHeight = renderTarget?.Texture.Height ?? Raylib.GetScreenHeight();
-            UpdateForwardPlusData(scene, camera, viewportWidth, viewportHeight, isEditorMode);
-            BindForwardPlusShaderData(viewportWidth, viewportHeight);
-        }
-
-        DrawRenderables(scene.Renderables, isEditorMode, RenderPass.Main, depthShader: default);
-
-        if (isEditorMode)
-            Raylib.DrawGrid(20, 1.0f);
-
-        postSceneRender?.Invoke();
-
-        Raylib.EndMode3D();
-
-        if (renderTarget.HasValue)
+            Raylib.BeginTextureMode(target);
+            request.ComposeFinalOverlay(new RenderFinalOverlayContext(target.Texture.Width, target.Texture.Height));
             Raylib.EndTextureMode();
+        }
 
-        LastFrameDrawCallCount = _frameDrawCallCount;
-        LastFrameSkinnedMeshCount = _frameSkinnedMeshCount;
+        _lastViewResult = result;
+        LastViewDiagnostics = result.Diagnostics;
+        return result;
     }
 
     /// <summary>
-    /// Renders scene geometry into a depth-only render texture using the provided depth shader.
-    /// The output stores normalized linear depth in the R channel.
-    /// Shader uniforms (nearPlane, farPlane) must be set by the caller before invoking this method.
+    /// Compatibility wrapper for existing callers that still supply an external render target.
     /// </summary>
-    /// <param name="scene">The scene to render.</param>
-    /// <param name="camera">The camera viewpoint.</param>
-    /// <param name="depthTarget">The render texture to write depth into.</param>
-    /// <param name="depthShader">The depth pre-pass shader (uniforms already configured).</param>
-    /// <param name="isEditorMode">When <c>true</c>, editor-only objects participate.</param>
+    public void Render(
+        Core.Scene.Scene scene,
+        Camera3D camera,
+        RenderTexture2D? renderTarget = null,
+        Action? postSceneRender = null,
+        bool isEditorMode = true)
+    {
+        int renderWidth = renderTarget?.Texture.Width ?? Raylib.GetScreenWidth();
+        int renderHeight = renderTarget?.Texture.Height ?? Raylib.GetScreenHeight();
+        var request = new RenderViewRequest
+        {
+            Scene = scene,
+            Camera = camera,
+            CameraComponent = scene.MainCamera,
+            DisplayWidth = renderWidth,
+            DisplayHeight = renderHeight,
+            RenderWidth = renderWidth,
+            RenderHeight = renderHeight,
+            IsEditorMode = isEditorMode,
+            DrawSceneOverlay3D = postSceneRender
+        };
+
+        var result = RenderView(request);
+        if (renderTarget.HasValue)
+        {
+            _backend.ResolveToRenderTexture(result.FinalTarget, renderTarget.Value);
+            return;
+        }
+
+        if (_backend.TryGetTexture(result.FinalTarget, out var texture))
+        {
+            var src = new Rectangle(0, 0, texture.Width, -texture.Height);
+            var dst = new Rectangle(0, 0, Raylib.GetScreenWidth(), Raylib.GetScreenHeight());
+            Raylib.DrawTexturePro(texture, src, dst, Vector2.Zero, 0f, Color.White);
+        }
+    }
+
+    /// <summary>
+    /// Renders a depth pre-pass for the currently visible set.
+    /// </summary>
     public void RenderDepthPrePass(
-        Scene.Scene scene,
+        Core.Scene.Scene scene,
         Camera3D camera,
         RenderTexture2D depthTarget,
         Shader depthShader,
         bool isEditorMode = true)
     {
-        Raylib.BeginTextureMode(depthTarget);
-        Raylib.ClearBackground(Color.White);
-        Raylib.BeginMode3D(camera);
-
-        DrawRenderables(scene.Renderables, isEditorMode, RenderPass.Depth, depthShader);
-
-        Raylib.EndMode3D();
-        Raylib.EndTextureMode();
-    }
-
-    private void DrawModelWithCustomShader(Model model, Matrix4x4 worldMatrix, Shader shader, RenderableComponent? renderable = null)
-    {
-        unsafe
+        var request = new RenderViewRequest
         {
-            for (int i = 0; i < model.MaterialCount; i++)
-                model.Materials[i].Shader = shader;
-        }
+            Scene = scene,
+            Camera = camera,
+            CameraComponent = scene.MainCamera,
+            DisplayWidth = depthTarget.Texture.Width,
+            DisplayHeight = depthTarget.Texture.Height,
+            RenderWidth = depthTarget.Texture.Width,
+            RenderHeight = depthTarget.Texture.Height,
+            IsEditorMode = isEditorMode
+        };
 
-        SetShaderBool(shader, GetUseInstancingLocation(shader), false);
-        bool useSkinning = PrepareSkinning(renderable);
-        SetShaderBool(shader, GetUseSkinningLocation(shader), useSkinning);
-        model.Transform = Matrix4x4.Transpose(worldMatrix);
-        Raylib.DrawModel(model, System.Numerics.Vector3.Zero, 1f, Color.White);
-    }
-
-    private void DrawModelWithShader(Model model, Matrix4x4 worldMatrix, Color tint, RenderableComponent? renderable = null)
-    {
-        if (_shaderLoaded)
-        {
-            SetShaderBool(_lightingShader, _lightingUseInstancingLoc, false);
-            bool useSkinning = PrepareSkinning(renderable);
-            SetShaderBool(_lightingShader, _lightingUseSkinningLoc, useSkinning);
-            unsafe
-            {
-                for (int i = 0; i < model.MaterialCount; i++)
-                {
-                    model.Materials[i].Shader = _lightingShader;
-                    model.Materials[i].Maps[(int)MaterialMapIndex.Occlusion].Texture = _lightDataTexture;
-                    model.Materials[i].Maps[(int)MaterialMapIndex.Emission].Texture = _tileHeaderTexture;
-                    model.Materials[i].Maps[(int)MaterialMapIndex.Height].Texture = _tileIndexTexture;
-                }
-            }
-        }
-
-        model.Transform = Matrix4x4.Transpose(worldMatrix);
-        Raylib.DrawModel(model, System.Numerics.Vector3.Zero, 1f, tint);
-        _frameDrawCallCount++;
-    }
-
-    private void DrawRenderables(
-        IReadOnlyList<RenderableComponent> renderables,
-        bool isEditorMode,
-        RenderPass pass,
-        Shader depthShader)
-    {
-        if (!RenderRuntimeCvars.AutoInstancingEnabled)
-        {
-            DrawRenderablesSequential(renderables, isEditorMode, pass, depthShader);
-            return;
-        }
-
-        DrawRenderablesAutoInstanced(renderables, isEditorMode, pass, depthShader);
-    }
-
-    private void DrawRenderablesSequential(
-        IReadOnlyList<RenderableComponent> renderables,
-        bool isEditorMode,
-        RenderPass pass,
-        Shader depthShader)
-    {
-        foreach (var renderable in renderables)
-        {
-            if (!ShouldDrawRenderable(renderable, isEditorMode))
-                continue;
-
-            renderable.EnsureModelReady();
-            if (!renderable.RenderModel.HasValue)
-                continue;
-
-            var model = renderable.RenderModel.Value;
-            var worldMatrix = renderable.Entity.Transform.WorldMatrix;
-            if (pass == RenderPass.Main)
-                DrawModelWithShader(model, worldMatrix, Color.White, renderable);
-            else
-                DrawModelWithCustomShader(model, worldMatrix, depthShader, renderable);
-        }
-    }
-
-    private void DrawRenderablesAutoInstanced(
-        IReadOnlyList<RenderableComponent> renderables,
-        bool isEditorMode,
-        RenderPass pass,
-        Shader depthShader)
-    {
-        _instancedBatches.Clear();
-        _instancingFallbackDraws.Clear();
-
-        foreach (var renderable in renderables)
-        {
-            if (!ShouldDrawRenderable(renderable, isEditorMode))
-                continue;
-
-            renderable.EnsureModelReady();
-            if (!renderable.RenderModel.HasValue)
-                continue;
-
-            var model = renderable.RenderModel.Value;
-            var item = new RenderableDrawItem(renderable, renderable.Entity.Transform.WorldMatrix);
-            if (!TryCreateRenderBatchKey(renderable, model, out var key))
-            {
-                _instancingFallbackDraws.Add(item);
-                continue;
-            }
-
-            if (!_instancedBatches.TryGetValue(key, out var batch))
-            {
-                batch = new InstancedBatchBucket(item);
-                _instancedBatches.Add(key, batch);
-            }
-
-            batch.InstanceTransforms.Add(Matrix4x4.Transpose(item.WorldMatrix));
-        }
-
-        if (pass == RenderPass.Main)
-        {
-            _lastAutoInstancingBatchCount = _instancedBatches.Count;
-            _lastAutoInstancingFallbackDrawCount = _instancingFallbackDraws.Count;
-        }
-
-        foreach (var fallback in _instancingFallbackDraws)
-            DrawRenderableItem(fallback, pass, depthShader);
-
-        foreach (var batch in _instancedBatches.Values)
-        {
-            if (batch.InstanceTransforms.Count <= 1)
-            {
-                DrawRenderableItem(batch.Representative, pass, depthShader);
-                continue;
-            }
-
-            if (pass == RenderPass.Main)
-            {
-                _lastAutoInstancingInstancedBatchCount++;
-                _lastAutoInstancingInstancedInstanceCount += batch.InstanceTransforms.Count;
-            }
-
-            DrawInstancedBatch(batch, pass, depthShader);
-        }
-    }
-
-    private void DrawRenderableItem(RenderableDrawItem item, RenderPass pass, Shader depthShader)
-    {
-        item.Renderable.EnsureModelReady();
-        if (!item.Renderable.RenderModel.HasValue)
-            return;
-
-        var model = item.Renderable.RenderModel.Value;
-        if (pass == RenderPass.Main)
-            DrawModelWithShader(model, item.WorldMatrix, Color.White, item.Renderable);
-        else
-            DrawModelWithCustomShader(model, item.WorldMatrix, depthShader, item.Renderable);
-    }
-
-    private void DrawInstancedBatch(InstancedBatchBucket batch, RenderPass pass, Shader depthShader)
-    {
-        batch.Representative.Renderable.EnsureModelReady();
-        if (!batch.Representative.Renderable.RenderModel.HasValue)
-            return;
-
-        var model = batch.Representative.Renderable.RenderModel.Value;
-        if (model.MeshCount <= 0)
-            return;
-
-        var transforms = batch.InstanceTransforms.ToArray();
-        var activeShader = pass == RenderPass.Main ? _lightingShader : depthShader;
-        int useInstancingLoc = pass == RenderPass.Main
-            ? _lightingUseInstancingLoc
-            : GetUseInstancingLocation(depthShader);
-        int previousMatrixModelLoc = GetShaderLocationFromLocs(activeShader, ShaderLocationIndex.MatrixModel);
-        int instanceAttribLoc = GetInstanceTransformAttribLocation(activeShader);
-
-        if (instanceAttribLoc >= 0)
-            SetShaderLocationInLocs(activeShader, ShaderLocationIndex.MatrixModel, instanceAttribLoc);
-        SetShaderBool(activeShader, useInstancingLoc, true);
-        SetShaderBool(activeShader, GetUseSkinningLocation(activeShader), false);
-
-        unsafe
-        {
-            for (int meshIndex = 0; meshIndex < model.MeshCount; meshIndex++)
-            {
-                int materialIndex = model.MeshMaterial != null ? model.MeshMaterial[meshIndex] : 0;
-                if (materialIndex < 0 || materialIndex >= model.MaterialCount)
-                    continue;
-
-                var mesh = model.Meshes[meshIndex];
-                var material = model.Materials[materialIndex];
-                ConfigureMaterialForPass(ref material, pass, depthShader);
-                Raylib.DrawMeshInstanced(mesh, material, transforms, transforms.Length);
-                if (pass == RenderPass.Main)
-                {
-                    _frameDrawCallCount++;
-                    _lastAutoInstancingInstancedMeshDrawCallCount++;
-                }
-            }
-        }
-
-        SetShaderBool(activeShader, useInstancingLoc, false);
-        SetShaderBool(activeShader, GetUseSkinningLocation(activeShader), false);
-        if (instanceAttribLoc >= 0)
-            SetShaderLocationInLocs(activeShader, ShaderLocationIndex.MatrixModel, previousMatrixModelLoc);
-    }
-
-    private unsafe void ConfigureMaterialForPass(ref Raylib_cs.Material material, RenderPass pass, Shader depthShader)
-    {
-        if (pass == RenderPass.Depth)
-        {
-            material.Shader = depthShader;
-            return;
-        }
-
-        if (!_shaderLoaded)
-            return;
-
-        material.Shader = _lightingShader;
-        material.Maps[(int)MaterialMapIndex.Occlusion].Texture = _lightDataTexture;
-        material.Maps[(int)MaterialMapIndex.Emission].Texture = _tileHeaderTexture;
-        material.Maps[(int)MaterialMapIndex.Height].Texture = _tileIndexTexture;
-    }
-
-    private static bool ShouldDrawRenderable(RenderableComponent renderable, bool isEditorMode)
-    {
-        if (!renderable.Entity.Active)
-            return false;
-        if (!renderable.Enabled)
-            return false;
-        if (renderable.EditorOnly && !isEditorMode)
-            return false;
-        return true;
-    }
-
-    private static bool TryCreateRenderBatchKey(RenderableComponent renderable, Model model, out RenderBatchKey key)
-    {
-        var animator = renderable.Entity.GetComponent<SkinnedMeshAnimatorComponent>();
-        if (animator != null && animator.Enabled)
-        {
-            key = default;
-            return false;
-        }
-
-        if (renderable is MeshRendererComponent meshRenderer)
-        {
-            var path = ResolveMeshAssetKey(meshRenderer.ModelPath.Path);
-            if (string.IsNullOrEmpty(path))
-            {
-                key = default;
-                return false;
-            }
-
-            int materialHash = ComputeMeshRendererMaterialHash(meshRenderer, model.MaterialCount);
-            key = new RenderBatchKey(
-                RenderBatchKind.MeshRenderer,
-                path,
-                default,
-                0,
-                materialHash);
-            return true;
-        }
-
-        if (renderable is PrimitiveComponent primitive)
-        {
-            key = new RenderBatchKey(
-                RenderBatchKind.Primitive,
-                string.Empty,
-                primitive.GetType().TypeHandle,
-                ComputePrimitiveGeometryHash(primitive),
-                primitive.Material?.GetConfigurationHash() ?? 0);
-            return true;
-        }
-
-        key = default;
-        return false;
-    }
-
-    private static string ResolveMeshAssetKey(string modelPath)
-    {
-        if (string.IsNullOrWhiteSpace(modelPath))
-            return string.Empty;
-
-        var resolved = AssetDatabase.Instance.ResolveAssetPath(modelPath) ?? modelPath;
-        return resolved.Replace('\\', '/');
-    }
-
-    private static int ComputeMeshRendererMaterialHash(MeshRendererComponent meshRenderer, int materialCount)
-    {
-        var hash = new HashCode();
-        hash.Add(materialCount);
-
-        for (int i = 0; i < materialCount; i++)
-        {
-            int slotHash = i < meshRenderer.MaterialSlots.Count && meshRenderer.MaterialSlots[i] != null
-                ? meshRenderer.MaterialSlots[i].GetConfigurationHash()
-                : 0;
-            hash.Add(slotHash);
-        }
-
-        return hash.ToHashCode();
-    }
-
-    private static int ComputePrimitiveGeometryHash(PrimitiveComponent primitive)
-    {
-        var hash = new HashCode();
-
-        switch (primitive)
-        {
-            case CubePrimitive cube:
-                hash.Add(BitConverter.SingleToInt32Bits(cube.Width));
-                hash.Add(BitConverter.SingleToInt32Bits(cube.Height));
-                hash.Add(BitConverter.SingleToInt32Bits(cube.Depth));
-                break;
-            case SpherePrimitive sphere:
-                hash.Add(BitConverter.SingleToInt32Bits(sphere.Radius));
-                hash.Add(sphere.Rings);
-                hash.Add(sphere.Slices);
-                break;
-            case PlanePrimitive plane:
-                hash.Add(BitConverter.SingleToInt32Bits(plane.Width));
-                hash.Add(BitConverter.SingleToInt32Bits(plane.Depth));
-                hash.Add(plane.ResolutionX);
-                hash.Add(plane.ResolutionZ);
-                break;
-            case CylinderPrimitive cylinder:
-                hash.Add(BitConverter.SingleToInt32Bits(cylinder.Radius));
-                hash.Add(BitConverter.SingleToInt32Bits(cylinder.Height));
-                hash.Add(cylinder.Slices);
-                break;
-            default:
-                return 0;
-        }
-
-        return hash.ToHashCode();
+        var frame = _extraction.Extract(scene, isEditorMode);
+        var visibleSet = _visibility.Cull(frame, request);
+        _backend.RenderDepthPrePass(visibleSet, camera, depthTarget, depthShader);
     }
 
     /// <summary>
-    /// Renders a binary selection mask of the specified entities into a render texture, used for outline effects.
+    /// Renders a selection mask for the currently visible selected entities.
     /// </summary>
-    /// <param name="scene">The scene containing the entities.</param>
-    /// <param name="camera">The camera viewpoint.</param>
-    /// <param name="selectedEntities">The entities to highlight.</param>
-    /// <param name="renderTarget">The render texture to draw the mask into.</param>
-    /// <param name="isEditorMode">When <c>true</c>, editor-only objects participate in depth testing.</param>
     public void RenderSelectionMask(
-        Scene.Scene scene,
+        Core.Scene.Scene scene,
         Camera3D camera,
         IReadOnlyList<Entity> selectedEntities,
         RenderTexture2D renderTarget,
         bool isEditorMode = true)
     {
-        if (!_selectionMaskShaderLoaded || selectedEntities.Count == 0)
+        var request = new RenderViewRequest
         {
-            Raylib.BeginTextureMode(renderTarget);
-            Raylib.ClearBackground(new Color(0, 0, 0, 0));
-            Raylib.EndTextureMode();
-            return;
-        }
+            Scene = scene,
+            Camera = camera,
+            CameraComponent = scene.MainCamera,
+            DisplayWidth = renderTarget.Texture.Width,
+            DisplayHeight = renderTarget.Texture.Height,
+            RenderWidth = renderTarget.Texture.Width,
+            RenderHeight = renderTarget.Texture.Height,
+            IsEditorMode = isEditorMode,
+            SelectedEntities = selectedEntities
+        };
 
-        Raylib.BeginTextureMode(renderTarget);
-        Raylib.ClearBackground(new Color(0, 0, 0, 0));
-        Raylib.BeginMode3D(camera);
-
-        Rlgl.DrawRenderBatchActive();
-        Rlgl.EnableDepthTest();
-        Rlgl.EnableDepthMask();
-        Rlgl.ColorMask(false, false, false, false);
-
-        foreach (var renderable in scene.Renderables)
-        {
-            if (!renderable.Entity.Active) continue;
-            if (!renderable.Enabled) continue;
-            if (renderable.EditorOnly && !isEditorMode) continue;
-            renderable.EnsureModelReady();
-            if (!renderable.RenderModel.HasValue) continue;
-            DrawModelWithShader(renderable.RenderModel.Value, renderable.Entity.Transform.WorldMatrix, Color.White, renderable);
-        }
-
-        Rlgl.DrawRenderBatchActive();
-        Rlgl.ColorMask(true, true, true, true);
-        Rlgl.DisableDepthMask();
-
-        foreach (var entity in selectedEntities)
-        {
-            if (!entity.Active)
-                continue;
-
-            var renderable = entity.GetComponent<RenderableComponent>();
-            if (renderable == null || !renderable.Enabled)
-                continue;
-
-            renderable.EnsureModelReady();
-            if (!renderable.RenderModel.HasValue)
-                continue;
-
-            var model = renderable.RenderModel.Value;
-            DrawModelWithCustomShader(model, entity.Transform.WorldMatrix, _selectionMaskShader, renderable);
-        }
-
-        Rlgl.DrawRenderBatchActive();
-        Rlgl.EnableDepthMask();
-        Raylib.EndMode3D();
-        Raylib.EndTextureMode();
+        var frame = _extraction.Extract(scene, isEditorMode);
+        var visibleSet = _visibility.Cull(frame, request);
+        _backend.RenderSelectionMask(visibleSet, camera, renderTarget);
     }
 
-    private void UpdateForwardPlusData(Scene.Scene scene, Camera3D camera, int viewportWidth, int viewportHeight, bool isEditorMode)
+    /// <summary>
+    /// Exposes backend target lookup for renderer-integrated callers.
+    /// </summary>
+    public bool TryGetTexture(RenderTargetHandle handle, out Texture2D texture) => _backend.TryGetTexture(handle, out texture);
+
+    /// <summary>
+    /// Exposes backend render-target lookup for renderer-integrated callers.
+    /// </summary>
+    public bool TryGetRenderTexture(RenderTargetHandle handle, out RenderTexture2D renderTexture) =>
+        _backend.TryGetRenderTexture(handle, out renderTexture);
+
+    /// <summary>
+    /// Gets the backend render target produced by the most recent view render.
+    /// </summary>
+    public bool TryGetLastViewRenderTexture(out RenderTexture2D renderTexture)
     {
-        EnsureForwardPlusResources(viewportWidth, viewportHeight);
-        BuildFrameLights(scene, camera, isEditorMode);
-        BuildTileLightLists(camera);
-        PackLightBuffer();
-        PackTileHeaderBuffer();
-        UploadForwardPlusBuffers();
-        MaybeLogForwardPlusWarnings();
+        if (_lastViewResult.HasValue)
+            return _backend.TryGetRenderTexture(_lastViewResult.Value.FinalTarget, out renderTexture);
+
+        renderTexture = default;
+        return false;
     }
 
-    private void BindForwardPlusShaderData(int viewportWidth, int viewportHeight)
+    /// <summary>
+    /// Gets automatic instancing diagnostics from the most recent frame.
+    /// </summary>
+    public AutoInstancingFrameStats GetAutoInstancingFrameStats()
     {
-        // Forward+ sampler textures are bound via material maps in DrawModelWithShader()
-        // instead of SetShaderValueTexture (which uses activeTextureId — unreliable
-        // because DrawRenderBatchActive clears it before DrawMesh binds textures).
-
-        SetShaderIVec2(_screenSizeLoc, viewportWidth, viewportHeight);
-        SetShaderIVec2(_tileCountLoc, _tileCountX, _tileCountY);
-        SetShaderIVec2(_lightDataTexSizeLoc, _lightDataTexWidth, _lightDataTexHeight);
-        SetShaderIVec2(_tileHeaderTexSizeLoc, _tileHeaderTexWidth, _tileHeaderTexHeight);
-        SetShaderIVec2(_tileIndexTexSizeLoc, _tileIndexTexWidth, _tileIndexTexHeight);
-
-        if (_tileSizeLoc >= 0)
-            Raylib.SetShaderValue(_lightingShader, _tileSizeLoc, _forwardPlusSettings.TileSize, ShaderUniformDataType.Int);
-        if (_totalLightsLoc >= 0)
-            Raylib.SetShaderValue(_lightingShader, _totalLightsLoc, _frameLights.Count, ShaderUniformDataType.Int);
+        var stats = _backend.GetAutoInstancingFrameStats();
+        return new AutoInstancingFrameStats(
+            stats.Enabled,
+            stats.BatchCount,
+            stats.InstancedBatchCount,
+            stats.InstancedInstanceCount,
+            stats.FallbackDrawCount,
+            stats.InstancedMeshDrawCalls);
     }
 
-    private void BuildFrameLights(Scene.Scene scene, Camera3D camera, bool isEditorMode)
+    /// <summary>
+    /// Gets Forward+ diagnostics from the most recent frame.
+    /// </summary>
+    public ForwardPlusFrameStats GetForwardPlusFrameStats()
     {
-        _frameLights.Clear();
-        _pointCandidates.Clear();
-        _forwardPlusDroppedTileLights = 0;
-        _forwardPlusClippedLights = 0;
-
-        var ambOvr = RenderRuntimeCvars.AmbientOverride;
-        float[] ambient = ambOvr.HasValue
-            ? new[] { ambOvr.Value.X, ambOvr.Value.Y, ambOvr.Value.Z, 1.0f }
-            : new[] { 0.15f, 0.15f, 0.15f, 1.0f };
-        bool skylightFound = false;
-        int eligibleLights = 0;
-        int visibleLights = 0;
-        int skylightCount = 0;
-        int directionalCount = 0;
-        int pointCount = 0;
-
-        var cameraPos = camera.Position;
-        var lights = scene.Lights;
-        _lastSceneLightCount = lights.Count;
-
-        foreach (var light in lights)
-        {
-            if (!light.Entity.Active) continue;
-            if (light.EditorOnly && !isEditorMode) continue;
-            if (!light.Enabled) continue;
-
-            visibleLights++;
-
-            if (light.LightType == LightType.Skylight)
-            {
-                skylightCount++;
-                if (!skylightFound)
-                {
-                    skylightFound = true;
-                    var skylightColor = light.LightColor;
-                    float intensity = light.Intensity;
-                    ambient = new[]
-                    {
-                        skylightColor.R / 255f * intensity,
-                        skylightColor.G / 255f * intensity,
-                        skylightColor.B / 255f * intensity,
-                        1.0f
-                    };
-                }
-                continue;
-            }
-
-            eligibleLights++;
-
-            var packed = CreatePackedLight(light);
-            if (packed.Type == PackedLightType.Directional)
-            {
-                directionalCount++;
-                if (_frameLights.Count < _forwardPlusSettings.MaxLights)
-                    _frameLights.Add(packed);
-                continue;
-            }
-
-            pointCount++;
-            var offset = packed.Position - cameraPos;
-            var distanceSquared = offset.LengthSquared();
-            _pointCandidates.Add(new PointLightCandidate(packed, distanceSquared));
-        }
-
-        _pointCandidates.Sort(static (a, b) => a.DistanceSquared.CompareTo(b.DistanceSquared));
-        foreach (var candidate in _pointCandidates)
-        {
-            if (_frameLights.Count >= _forwardPlusSettings.MaxLights)
-                break;
-            _frameLights.Add(candidate.Light);
-        }
-
-        _forwardPlusClippedLights = Math.Max(0, eligibleLights - _frameLights.Count);
-        _lastVisibleLightCount = visibleLights;
-        _lastSkylightCount = skylightCount;
-        _lastDirectionalLightCount = directionalCount;
-        _lastPointLightCount = pointCount;
-        Raylib.SetShaderValue(_lightingShader, _ambientLoc, ambient, ShaderUniformDataType.Vec4);
+        var stats = _backend.GetForwardPlusFrameStats();
+        return new ForwardPlusFrameStats(
+            stats.Valid,
+            stats.SceneLights,
+            stats.VisibleLights,
+            stats.Skylights,
+            stats.DirectionalLights,
+            stats.PointLights,
+            stats.AssignedLights,
+            stats.ClippedLights,
+            stats.DroppedTileLinks,
+            stats.TileSize,
+            stats.TilesX,
+            stats.TilesY,
+            stats.MaxLights,
+            stats.MaxLightsPerTile,
+            stats.AverageLightsPerTile,
+            stats.PeakLightsPerTile);
     }
-
-    private void BuildTileLightLists(Camera3D camera)
-    {
-        Array.Fill(_tileLightCounts, 0);
-        Array.Fill(_tileLightScores, float.PositiveInfinity);
-        Array.Fill(_tileIndexBuffer, -1f);
-
-        for (int lightIndex = 0; lightIndex < _frameLights.Count; lightIndex++)
-        {
-            var light = _frameLights[lightIndex];
-            if (light.Type == PackedLightType.Directional)
-            {
-                for (int tileIndex = 0; tileIndex < _tileCount; tileIndex++)
-                    TryInsertTileLight(tileIndex, lightIndex, -1f);
-                continue;
-            }
-
-            if (!TryProjectPointLight(camera, light.Position, light.Range, out var projected))
-                continue;
-
-            for (int ty = projected.MinTileY; ty <= projected.MaxTileY; ty++)
-            {
-                for (int tx = projected.MinTileX; tx <= projected.MaxTileX; tx++)
-                {
-                    int tileIndex = ty * _tileCountX + tx;
-                    float tileCenterX = tx * _forwardPlusSettings.TileSize + _forwardPlusSettings.TileSize * 0.5f;
-                    float tileCenterY = ty * _forwardPlusSettings.TileSize + _forwardPlusSettings.TileSize * 0.5f;
-                    float dx = tileCenterX - projected.CenterPixelX;
-                    float dy = tileCenterY - projected.CenterPixelY;
-                    float score = dx * dx + dy * dy + projected.DepthScore;
-                    TryInsertTileLight(tileIndex, lightIndex, score);
-                }
-            }
-        }
-
-        if (_tileCount > 0)
-        {
-            int sum = 0;
-            int peak = 0;
-            for (int i = 0; i < _tileCount; i++)
-            {
-                int count = _tileLightCounts[i];
-                sum += count;
-                if (count > peak)
-                    peak = count;
-            }
-
-            _lastAverageLightsPerTile = sum / (float)_tileCount;
-            _lastMaxLightsPerTile = peak;
-        }
-        else
-        {
-            _lastAverageLightsPerTile = 0f;
-            _lastMaxLightsPerTile = 0;
-        }
-
-        _lastStatsValid = true;
-    }
-
-    private void TryInsertTileLight(int tileIndex, int lightIndex, float score)
-    {
-        int baseSlot = tileIndex * _forwardPlusSettings.MaxLightsPerTile;
-        int count = _tileLightCounts[tileIndex];
-
-        if (count < _forwardPlusSettings.MaxLightsPerTile)
-        {
-            int slot = baseSlot + count;
-            SetTileIndexValue(slot, lightIndex);
-            _tileLightScores[slot] = score;
-            _tileLightCounts[tileIndex] = count + 1;
-            return;
-        }
-
-        _forwardPlusDroppedTileLights++;
-
-        int worstSlot = baseSlot;
-        float worstScore = _tileLightScores[baseSlot];
-        for (int i = 1; i < _forwardPlusSettings.MaxLightsPerTile; i++)
-        {
-            int slot = baseSlot + i;
-            float currentScore = _tileLightScores[slot];
-            if (currentScore > worstScore)
-            {
-                worstScore = currentScore;
-                worstSlot = slot;
-            }
-        }
-
-        if (score >= worstScore)
-            return;
-
-        SetTileIndexValue(worstSlot, lightIndex);
-        _tileLightScores[worstSlot] = score;
-    }
-
-    private void SetTileIndexValue(int slot, int lightIndex)
-    {
-        int dataOffset = slot * 4;
-        _tileIndexBuffer[dataOffset] = lightIndex;
-        _tileIndexBuffer[dataOffset + 1] = 0f;
-        _tileIndexBuffer[dataOffset + 2] = 0f;
-        _tileIndexBuffer[dataOffset + 3] = 0f;
-    }
-
-    private void PackLightBuffer()
-    {
-        Array.Fill(_lightDataBuffer, 0f);
-
-        for (int i = 0; i < _frameLights.Count; i++)
-        {
-            var light = _frameLights[i];
-            int lightStartTexel = i * LightTexelsPerLight;
-
-            WritePackedVec4(_lightDataBuffer, lightStartTexel + 0,
-                (int)light.Type, 1f, light.Range, 0f);
-            WritePackedVec4(_lightDataBuffer, lightStartTexel + 1,
-                light.Position.X, light.Position.Y, light.Position.Z, 0f);
-            WritePackedVec4(_lightDataBuffer, lightStartTexel + 2,
-                light.Direction.X, light.Direction.Y, light.Direction.Z, 0f);
-            WritePackedVec4(_lightDataBuffer, lightStartTexel + 3,
-                light.Color.X, light.Color.Y, light.Color.Z, 1f);
-        }
-    }
-
-    private void PackTileHeaderBuffer()
-    {
-        for (int tileIndex = 0; tileIndex < _tileCount; tileIndex++)
-        {
-            int start = tileIndex * _forwardPlusSettings.MaxLightsPerTile;
-            int count = _tileLightCounts[tileIndex];
-            WritePackedVec4(_tileHeaderBuffer, tileIndex, start, count, 0f, 0f);
-        }
-    }
-
-    private void UploadForwardPlusBuffers()
-    {
-        if (_lightDataTexture.Id != 0)
-            Raylib.UpdateTexture(_lightDataTexture, _lightDataBuffer);
-        if (_tileHeaderTexture.Id != 0)
-            Raylib.UpdateTexture(_tileHeaderTexture, _tileHeaderBuffer);
-        if (_tileIndexTexture.Id != 0)
-            Raylib.UpdateTexture(_tileIndexTexture, _tileIndexBuffer);
-    }
-
-    private void EnsureForwardPlusResources(int viewportWidth, int viewportHeight)
-    {
-        if (viewportWidth <= 0 || viewportHeight <= 0)
-            return;
-
-        bool viewportChanged = _viewportWidth != viewportWidth || _viewportHeight != viewportHeight;
-        if (viewportChanged)
-        {
-            _viewportWidth = viewportWidth;
-            _viewportHeight = viewportHeight;
-        }
-
-        int requiredTileCountX = (_viewportWidth + _forwardPlusSettings.TileSize - 1) / _forwardPlusSettings.TileSize;
-        int requiredTileCountY = (_viewportHeight + _forwardPlusSettings.TileSize - 1) / _forwardPlusSettings.TileSize;
-        int requiredTileCount = Math.Max(1, requiredTileCountX * requiredTileCountY);
-
-        bool tilesChanged = requiredTileCountX != _tileCountX
-                            || requiredTileCountY != _tileCountY
-                            || requiredTileCount != _tileCount;
-
-        _tileCountX = requiredTileCountX;
-        _tileCountY = requiredTileCountY;
-        _tileCount = requiredTileCount;
-
-        int requiredLightEntries = Math.Max(1, _forwardPlusSettings.MaxLights * LightTexelsPerLight);
-        int requiredHeaderEntries = Math.Max(1, _tileCount);
-        int requiredIndexEntries = Math.Max(1, _tileCount * _forwardPlusSettings.MaxLightsPerTile);
-
-        EnsurePackedTexture(
-            ref _lightDataTexture,
-            ref _lightDataBuffer,
-            ref _lightDataEntries,
-            ref _lightDataTexWidth,
-            ref _lightDataTexHeight,
-            requiredLightEntries);
-
-        bool tileStorageChanged = tilesChanged
-                                  || requiredHeaderEntries != _tileHeaderEntries
-                                  || requiredIndexEntries != _tileIndexEntries;
-
-        EnsurePackedTexture(
-            ref _tileHeaderTexture,
-            ref _tileHeaderBuffer,
-            ref _tileHeaderEntries,
-            ref _tileHeaderTexWidth,
-            ref _tileHeaderTexHeight,
-            requiredHeaderEntries);
-
-        EnsurePackedTexture(
-            ref _tileIndexTexture,
-            ref _tileIndexBuffer,
-            ref _tileIndexEntries,
-            ref _tileIndexTexWidth,
-            ref _tileIndexTexHeight,
-            requiredIndexEntries);
-
-        if (tileStorageChanged || _tileLightCounts.Length != _tileCount)
-        {
-            _tileLightCounts = new int[_tileCount];
-            _tileLightScores = new float[_tileCount * _forwardPlusSettings.MaxLightsPerTile];
-        }
-    }
-
-    private void EnsurePackedTexture(
-        ref Texture2D texture,
-        ref float[] buffer,
-        ref int entryCount,
-        ref int textureWidth,
-        ref int textureHeight,
-        int requiredEntries)
-    {
-        if (requiredEntries <= 0)
-            requiredEntries = 1;
-
-        var (requiredWidth, requiredHeight) = ComputePackedTextureSize(requiredEntries);
-        bool recreateTexture = texture.Id == 0
-                               || requiredWidth != textureWidth
-                               || requiredHeight != textureHeight;
-
-        if (recreateTexture)
-        {
-            if (texture.Id != 0)
-                Raylib.UnloadTexture(texture);
-
-            texture = CreateFloatTexture(requiredWidth, requiredHeight);
-            textureWidth = requiredWidth;
-            textureHeight = requiredHeight;
-        }
-
-        int requiredBufferLength = requiredWidth * requiredHeight * 4;
-        if (buffer.Length != requiredBufferLength)
-            buffer = new float[requiredBufferLength];
-
-        entryCount = requiredEntries;
-    }
-
-    private static (int Width, int Height) ComputePackedTextureSize(int entries)
-    {
-        entries = Math.Max(entries, 1);
-        int width = Math.Min(PackedTextureMaxWidth, entries);
-        int height = (entries + width - 1) / width;
-        return (width, Math.Max(1, height));
-    }
-
-    private static unsafe Texture2D CreateFloatTexture(int width, int height)
-    {
-        var initial = new float[width * height * 4];
-        fixed (float* data = initial)
-        {
-            uint textureId = Rlgl.LoadTexture(data, width, height, PixelFormat.UncompressedR32G32B32A32, 1);
-            var texture = new Texture2D
-            {
-                Id = textureId,
-                Width = width,
-                Height = height,
-                Mipmaps = 1,
-                Format = PixelFormat.UncompressedR32G32B32A32
-            };
-
-            if (texture.Id != 0)
-            {
-                Raylib.SetTextureFilter(texture, TextureFilter.Point);
-                Raylib.SetTextureWrap(texture, TextureWrap.Clamp);
-            }
-
-            return texture;
-        }
-    }
-
-    private PackedLight CreatePackedLight(LightComponent light)
-    {
-        var c = light.LightColor;
-        float intensity = light.Intensity;
-        var color = new Vector3(c.R / 255f * intensity, c.G / 255f * intensity, c.B / 255f * intensity);
-
-        if (light.LightType == LightType.Directional)
-        {
-            var direction = light.Entity.Transform.Forward;
-            if (direction.LengthSquared() > 1e-8f)
-                direction = Vector3.Normalize(direction);
-            else
-                direction = -Vector3.UnitY;
-
-            return new PackedLight(
-                PackedLightType.Directional,
-                Vector3.Zero,
-                direction,
-                color,
-                0f);
-        }
-
-        return new PackedLight(
-            PackedLightType.Point,
-            light.Entity.Transform.WorldPosition,
-            Vector3.Zero,
-            color,
-            MathF.Max(0f, light.Range));
-    }
-
-    private bool TryProjectPointLight(Camera3D camera, Vector3 position, float range, out ProjectedPointLight projected)
-    {
-        projected = default;
-        if (range <= 0f || _tileCountX <= 0 || _tileCountY <= 0)
-            return false;
-
-        var view = Matrix4x4.CreateLookAt(camera.Position, camera.Target, camera.Up);
-        var viewSpacePosition = Vector3.Transform(position, view);
-
-        float aspect = MathF.Max(1e-5f, _viewportWidth / (float)Math.Max(1, _viewportHeight));
-        float ndcX;
-        float ndcY;
-        float radiusNdcX;
-        float radiusNdcY;
-        float depthForScore;
-
-        if (camera.Projection == CameraProjection.Perspective)
-        {
-            float depth = -viewSpacePosition.Z;
-            if (depth <= -range)
-                return false;
-
-            depthForScore = MathF.Max(depth, MinPerspectiveDepth);
-
-            float halfFovRad = MathF.Max(1e-4f, camera.FovY * 0.5f * (MathF.PI / 180f));
-            float halfHeight = depthForScore * MathF.Tan(halfFovRad);
-            if (halfHeight <= 1e-5f)
-                return false;
-
-            float halfWidth = halfHeight * aspect;
-            ndcX = viewSpacePosition.X / halfWidth;
-            ndcY = viewSpacePosition.Y / halfHeight;
-            radiusNdcX = range / halfWidth;
-            radiusNdcY = range / halfHeight;
-        }
-        else
-        {
-            float halfHeight = MathF.Max(0.01f, camera.FovY * 0.5f);
-            float halfWidth = halfHeight * aspect;
-            ndcX = viewSpacePosition.X / halfWidth;
-            ndcY = viewSpacePosition.Y / halfHeight;
-            radiusNdcX = range / halfWidth;
-            radiusNdcY = range / halfHeight;
-            depthForScore = 1f;
-        }
-
-        if (ndcX + radiusNdcX < -1f || ndcX - radiusNdcX > 1f || ndcY + radiusNdcY < -1f || ndcY - radiusNdcY > 1f)
-            return false;
-
-        float centerPixelX = (ndcX * 0.5f + 0.5f) * _viewportWidth;
-        float centerPixelY = (-ndcY * 0.5f + 0.5f) * _viewportHeight;
-        float radiusPixelsX = radiusNdcX * 0.5f * _viewportWidth;
-        float radiusPixelsY = radiusNdcY * 0.5f * _viewportHeight;
-
-        float minPixelX = centerPixelX - radiusPixelsX;
-        float maxPixelX = centerPixelX + radiusPixelsX;
-        float minPixelY = centerPixelY - radiusPixelsY;
-        float maxPixelY = centerPixelY + radiusPixelsY;
-
-        if (maxPixelX < 0f || minPixelX > _viewportWidth || maxPixelY < 0f || minPixelY > _viewportHeight)
-            return false;
-
-        int clampedMinPixelX = Math.Clamp((int)MathF.Floor(minPixelX), 0, Math.Max(0, _viewportWidth - 1));
-        int clampedMaxPixelX = Math.Clamp((int)MathF.Ceiling(maxPixelX), 0, Math.Max(0, _viewportWidth - 1));
-        int clampedMinPixelY = Math.Clamp((int)MathF.Floor(minPixelY), 0, Math.Max(0, _viewportHeight - 1));
-        int clampedMaxPixelY = Math.Clamp((int)MathF.Ceiling(maxPixelY), 0, Math.Max(0, _viewportHeight - 1));
-
-        if (clampedMinPixelX > clampedMaxPixelX || clampedMinPixelY > clampedMaxPixelY)
-            return false;
-
-        projected = new ProjectedPointLight(
-            clampedMinPixelX / _forwardPlusSettings.TileSize,
-            clampedMaxPixelX / _forwardPlusSettings.TileSize,
-            clampedMinPixelY / _forwardPlusSettings.TileSize,
-            clampedMaxPixelY / _forwardPlusSettings.TileSize,
-            centerPixelX,
-            centerPixelY,
-            depthForScore * depthForScore * 0.001f);
-        return true;
-    }
-
-    private void MaybeLogForwardPlusWarnings()
-    {
-        _frameCounter++;
-        if ((_forwardPlusClippedLights <= 0 && _forwardPlusDroppedTileLights <= 0)
-            || _frameCounter % ForwardPlusWarningLogIntervalFrames != 0)
-            return;
-
-        FrinkyLog.Warning(
-            $"Forward+ budget pressure: clippedLights={_forwardPlusClippedLights}, droppedTileLinks={_forwardPlusDroppedTileLights}, " +
-            $"maxLights={_forwardPlusSettings.MaxLights}, maxLightsPerTile={_forwardPlusSettings.MaxLightsPerTile}, " +
-            $"tiles={_tileCountX}x{_tileCountY}");
-    }
-
-    private static void WritePackedVec4(float[] buffer, int texelIndex, float x, float y, float z, float w)
-    {
-        int dataIndex = texelIndex * 4;
-        buffer[dataIndex + 0] = x;
-        buffer[dataIndex + 1] = y;
-        buffer[dataIndex + 2] = z;
-        buffer[dataIndex + 3] = w;
-    }
-
-    private void SetShaderIVec2(int location, int x, int y)
-    {
-        if (location < 0)
-            return;
-
-        Span<int> vec2 = stackalloc int[2];
-        vec2[0] = x;
-        vec2[1] = y;
-        Raylib.SetShaderValue(_lightingShader, location, vec2, ShaderUniformDataType.IVec2);
-    }
-
-    private void ReleaseForwardPlusTextures()
-    {
-        if (_lightDataTexture.Id != 0)
-            Raylib.UnloadTexture(_lightDataTexture);
-        if (_tileHeaderTexture.Id != 0)
-            Raylib.UnloadTexture(_tileHeaderTexture);
-        if (_tileIndexTexture.Id != 0)
-            Raylib.UnloadTexture(_tileIndexTexture);
-
-        _lightDataTexture = default;
-        _tileHeaderTexture = default;
-        _tileIndexTexture = default;
-    }
-
-    private int GetUseInstancingLocation(Shader shader)
-    {
-        if (shader.Id == 0)
-            return -1;
-
-        if (_useInstancingLocationCache.TryGetValue(shader.Id, out var cached))
-            return cached;
-
-        int loc = Raylib.GetShaderLocation(shader, "useInstancing");
-        _useInstancingLocationCache[shader.Id] = loc;
-        return loc;
-    }
-
-    private int GetUseSkinningLocation(Shader shader)
-    {
-        if (shader.Id == 0)
-            return -1;
-
-        if (_useSkinningLocationCache.TryGetValue(shader.Id, out var cached))
-            return cached;
-
-        int loc = Raylib.GetShaderLocation(shader, "useSkinning");
-        _useSkinningLocationCache[shader.Id] = loc;
-        return loc;
-    }
-
-    private int GetInstanceTransformAttribLocation(Shader shader)
-    {
-        if (shader.Id == 0)
-            return -1;
-
-        if (_instanceTransformAttribLocationCache.TryGetValue(shader.Id, out var cached))
-            return cached;
-
-        int loc = Raylib.GetShaderLocationAttrib(shader, "instanceTransform");
-        _instanceTransformAttribLocationCache[shader.Id] = loc;
-        return loc;
-    }
-
-    private static unsafe int GetShaderLocationFromLocs(Shader shader, ShaderLocationIndex index)
-    {
-        if (shader.Locs == null)
-            return -1;
-
-        return shader.Locs[(int)index];
-    }
-
-    private static unsafe void SetShaderLocationInLocs(Shader shader, ShaderLocationIndex index, int location)
-    {
-        if (shader.Locs == null)
-            return;
-
-        shader.Locs[(int)index] = location;
-    }
-
-    private static void SetShaderBool(Shader shader, int location, bool enabled)
-    {
-        if (shader.Id == 0 || location < 0)
-            return;
-
-        int value = enabled ? 1 : 0;
-        Raylib.SetShaderValue(shader, location, value, ShaderUniformDataType.Int);
-    }
-
-    private bool PrepareSkinning(RenderableComponent? renderable)
-    {
-        if (renderable == null)
-            return false;
-
-        var animator = renderable.Entity.GetComponent<SkinnedMeshAnimatorComponent>();
-        if (animator == null || !animator.Enabled)
-            return false;
-
-        using (FrameProfiler.Scope(ProfileCategory.Skinning))
-        {
-            animator.PrepareForRender(_animationFrameToken);
-        }
-
-        bool active = animator.UsesSkinning;
-        if (active)
-            _frameSkinnedMeshCount++;
-        return active;
-    }
-
-    private enum RenderPass
-    {
-        Main = 0,
-        Depth = 1
-    }
-
-    private enum RenderBatchKind
-    {
-        MeshRenderer = 0,
-        Primitive = 1
-    }
-
-    private readonly record struct RenderBatchKey(
-        RenderBatchKind Kind,
-        string ModelPath,
-        RuntimeTypeHandle PrimitiveType,
-        int GeometryHash,
-        int MaterialHash);
-
-    private readonly record struct RenderableDrawItem(
-        RenderableComponent Renderable,
-        Matrix4x4 WorldMatrix);
-
-    private sealed class InstancedBatchBucket(RenderableDrawItem representative)
-    {
-        public RenderableDrawItem Representative { get; } = representative;
-        public List<Matrix4x4> InstanceTransforms { get; } = new();
-    }
-
-    private enum PackedLightType
-    {
-        Directional = 0,
-        Point = 1
-    }
-
-    private readonly record struct PackedLight(
-        PackedLightType Type,
-        Vector3 Position,
-        Vector3 Direction,
-        Vector3 Color,
-        float Range);
-
-    private readonly record struct PointLightCandidate(PackedLight Light, float DistanceSquared);
-
-    private readonly record struct ProjectedPointLight(
-        int MinTileX,
-        int MaxTileX,
-        int MinTileY,
-        int MaxTileY,
-        float CenterPixelX,
-        float CenterPixelY,
-        float DepthScore);
 }

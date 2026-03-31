@@ -42,5 +42,5 @@ public class CylinderPrimitive : PrimitiveComponent
     }
 
     /// <inheritdoc />
-    protected override Mesh CreateMesh() => Raylib.GenMeshCylinder(_radius, _height, _slices);
+    protected internal override Mesh CreateMesh() => Raylib.GenMeshCylinder(_radius, _height, _slices);
 }

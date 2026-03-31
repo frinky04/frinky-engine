@@ -42,5 +42,5 @@ public class SpherePrimitive : PrimitiveComponent
     }
 
     /// <inheritdoc />
-    protected override Mesh CreateMesh() => Raylib.GenMeshSphere(_radius, _rings, _slices);
+    protected internal override Mesh CreateMesh() => Raylib.GenMeshSphere(_radius, _rings, _slices);
 }

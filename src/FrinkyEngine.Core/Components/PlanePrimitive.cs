@@ -52,5 +52,5 @@ public class PlanePrimitive : PrimitiveComponent
     }
 
     /// <inheritdoc />
-    protected override Mesh CreateMesh() => Raylib.GenMeshPlane(_width, _depth, _resolutionX, _resolutionZ);
+    protected internal override Mesh CreateMesh() => Raylib.GenMeshPlane(_width, _depth, _resolutionX, _resolutionZ);
 }

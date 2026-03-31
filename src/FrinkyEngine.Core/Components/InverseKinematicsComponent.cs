@@ -2,6 +2,7 @@ using System.Numerics;
 using System.Linq;
 using FrinkyEngine.Core.Animation.IK;
 using FrinkyEngine.Core.ECS;
+using FrinkyEngine.Core.Rendering;
 using Raylib_cs;
 
 namespace FrinkyEngine.Core.Components;
@@ -141,8 +142,8 @@ public class InverseKinematicsComponent : Component
     private void EnsureHierarchyFromMeshRenderer()
     {
         var meshRenderer = Entity.GetComponent<MeshRendererComponent>();
-        meshRenderer?.EnsureModelReady();
-        if (meshRenderer?.RenderModel.HasValue == true)
-            EnsureHierarchy(meshRenderer.RenderModel.Value);
+        var queries = RenderGeometryQueries.Current;
+        if (meshRenderer != null && queries != null && queries.TryGetSharedModel(meshRenderer, out var model))
+            EnsureHierarchy(model);
     }
 }

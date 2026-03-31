@@ -42,5 +42,5 @@ public class CubePrimitive : PrimitiveComponent
     }
 
     /// <inheritdoc />
-    protected override Mesh CreateMesh() => Raylib.GenMeshCube(_width, _height, _depth);
+    protected internal override Mesh CreateMesh() => Raylib.GenMeshCube(_width, _height, _depth);
 }

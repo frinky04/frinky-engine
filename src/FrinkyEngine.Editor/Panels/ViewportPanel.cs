@@ -171,6 +171,7 @@ public class ViewportPanel
                             isEditorMode: isEditorMode);
                     }
 
+                    // TODO: Move post-processing, selection outline, upscale, and game UI composition into SceneRenderer's render graph.
                     // Post-processing (at scaled resolution)
                     var mainCamEntity = _app.CurrentScene.MainCamera?.Entity;
                     var ppStack = mainCamEntity?.GetComponent<PostProcessStackComponent>();
@@ -181,6 +182,10 @@ public class ViewportPanel
                         && ppStack.Effects.Count > 0)
                     {
                         _postProcessPipeline.Initialize("Shaders");
+                        var depthTexture = _renderTexture.Depth;
+                        if (_app.SceneRenderer.TryGetLastViewRenderTexture(out var sceneViewTarget) && sceneViewTarget.Depth.Id != 0)
+                            depthTexture = sceneViewTarget.Depth;
+
                         var postProcessedTex = _postProcessPipeline.Execute(
                             ppStack,
                             _renderTexture.Texture,
@@ -190,7 +195,7 @@ public class ViewportPanel
                             _app.CurrentScene,
                             _lastScaledWidth, _lastScaledHeight,
                             isEditorMode,
-                            _renderTexture.Depth);
+                            depthTexture);
 
                         // If post-processing produced a different texture, blit it back to _renderTexture
                         if (postProcessedTex.Id != _renderTexture.Texture.Id)

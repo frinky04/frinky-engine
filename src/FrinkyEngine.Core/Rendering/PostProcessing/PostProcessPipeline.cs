@@ -11,6 +11,7 @@ namespace FrinkyEngine.Core.Rendering.PostProcessing;
 /// </summary>
 public class PostProcessPipeline
 {
+    // TODO: Move this pipeline onto backend-neutral render-target handles once the renderer graph owns post and final composite.
     private RenderTexture2D _pingRT;
     private RenderTexture2D _pongRT;
     private RenderTexture2D _depthRT;

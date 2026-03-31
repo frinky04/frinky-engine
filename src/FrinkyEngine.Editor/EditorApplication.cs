@@ -692,7 +692,7 @@ public class EditorApplication
 
         if (relativePaths.Count > 0 && CurrentScene != null)
         {
-            // Invalidate components first (clear RenderModel) before unloading GPU resources
+            // Invalidate component-backed resource keys first, then drop backend-owned GPU state.
             foreach (var renderable in CurrentScene.Renderables)
             {
                 bool shouldInvalidate = false;
@@ -735,6 +735,8 @@ public class EditorApplication
             // Now unload stale GPU resources from the cache
             foreach (var rel in relativePaths)
                 AssetManager.Instance.InvalidateAsset(rel);
+
+            SceneRenderer.InvalidateAssets(relativePaths);
         }
 
         if (changedPrefabs.Count > 0)
