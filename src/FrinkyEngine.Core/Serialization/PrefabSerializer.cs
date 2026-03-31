@@ -351,6 +351,9 @@ public static class PrefabSerializer
             }
         }
 
+        if (component is Components.MeshRendererComponent meshRenderer)
+            meshRenderer.SyncMaterialSlotsWithModel();
+
         // Migrate legacy component-level Tint into Material(s)
         if (component is Components.RenderableComponent && data.Properties.TryGetValue("Tint", out var tintEl))
         {

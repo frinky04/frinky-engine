@@ -25,6 +25,7 @@ public class TransformComponent : Component
     /// Monotonically increasing version incremented whenever this transform changes.
     /// Used by renderer-side world-bounds caches.
     /// </summary>
+    [InspectorHidden]
     public int TransformVersion { get; private set; }
 
     /// <summary>

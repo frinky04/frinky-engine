@@ -1,5 +1,6 @@
 using FrinkyEngine.Core.Assets;
 using FrinkyEngine.Core.ECS;
+using Raylib_cs;
 
 namespace FrinkyEngine.Core.Components;
 
@@ -31,6 +32,7 @@ public class MeshRendererComponent : RenderableComponent
                 return;
 
             _modelPath = value;
+            SyncMaterialSlotsWithModel();
             Invalidate();
         }
     }
@@ -47,7 +49,41 @@ public class MeshRendererComponent : RenderableComponent
     /// </summary>
     public void RefreshMaterials()
     {
+        SyncMaterialSlotsWithModel();
         Invalidate();
+    }
+
+    /// <summary>
+    /// Resizes <see cref="MaterialSlots"/> to match the current model material count while preserving existing overrides.
+    /// </summary>
+    public void SyncMaterialSlotsWithModel()
+    {
+        if (_modelPath.IsEmpty)
+        {
+            MaterialSlots.Clear();
+            return;
+        }
+
+        Model model = AssetManager.Instance.LoadModel(_modelPath.Path);
+        int targetCount = Math.Max(0, model.MaterialCount);
+        if (targetCount == MaterialSlots.Count)
+            return;
+
+        if (targetCount == 0)
+        {
+            MaterialSlots.Clear();
+            return;
+        }
+
+        if (MaterialSlots.Count > targetCount)
+        {
+            MaterialSlots.RemoveRange(targetCount, MaterialSlots.Count - targetCount);
+        }
+        else
+        {
+            while (MaterialSlots.Count < targetCount)
+                MaterialSlots.Add(new Material());
+        }
     }
 
     /// <inheritdoc />

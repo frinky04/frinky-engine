@@ -434,6 +434,9 @@ public static class SceneSerializer
             }
         }
 
+        if (component is MeshRendererComponent meshRenderer)
+            meshRenderer.SyncMaterialSlotsWithModel();
+
         // Migrate legacy component-level Tint into Material(s)
         if (component is RenderableComponent && data.Properties.TryGetValue("Tint", out var tintEl))
         {
