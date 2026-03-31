@@ -13,6 +13,12 @@
   </ItemGroup>
 
   <ItemGroup>
+    <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleTo">
+      <_Parameter1>FrinkyEngine.Editor.Tests</_Parameter1>
+    </AssemblyAttribute>
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\FrinkyEngine.Core\FrinkyEngine.Core.csproj" />
   </ItemGroup>
 

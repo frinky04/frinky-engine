@@ -264,4 +264,17 @@ public static class ConsoleBackend
     {
         return new ConsoleExecutionResult(success: false, new[] { line });
     }
+
+    /// <summary>
+    /// Resets all registered console state for tests.
+    /// </summary>
+    internal static void ResetForTests()
+    {
+        lock (Sync)
+        {
+            Commands.Clear();
+            CVars.Clear();
+            _builtinsRegistered = false;
+        }
+    }
 }

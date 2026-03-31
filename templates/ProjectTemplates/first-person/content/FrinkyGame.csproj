@@ -13,4 +13,5 @@
     <PackageReference Include="Raylib-cs" Version="7.0.2" />
     <!-- Reference FrinkyEngine.Core either as a project reference or NuGet package -->
     <!-- <ProjectReference Include="path/to/FrinkyEngine.Core.csproj" /> -->
+  </ItemGroup>
 </Project>

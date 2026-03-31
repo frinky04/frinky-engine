@@ -9,10 +9,43 @@ namespace FrinkyEngine.Editor;
 
 public static class ProjectScaffolder
 {
+    internal interface IProcessRunner
+    {
+        void Run(string fileName, string workingDirectory, string arguments, int timeoutMilliseconds);
+    }
+
+    internal sealed class DefaultProcessRunner : IProcessRunner
+    {
+        public void Run(string fileName, string workingDirectory, string arguments, int timeoutMilliseconds)
+        {
+            var psi = new ProcessStartInfo
+            {
+                FileName = fileName,
+                Arguments = arguments,
+                WorkingDirectory = workingDirectory,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+
+            using var process = Process.Start(psi)!;
+            process.WaitForExit(timeoutMilliseconds);
+
+            if (process.ExitCode != 0)
+            {
+                var stderr = process.StandardError.ReadToEnd();
+                throw new InvalidOperationException($"{fileName} {arguments} failed: {stderr}");
+            }
+        }
+    }
+
     private static readonly HashSet<string> TextFileExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
         ".cs", ".json", ".fscene", ".fprefab", ".txt", ".md", ".gitignore"
     };
+
+    internal static IProcessRunner ProcessRunner { get; set; } = new DefaultProcessRunner();
 
     /// <summary>
     /// Creates a new game project on disk and returns the path to the .fproject file.
@@ -330,47 +363,11 @@ public static class ProjectScaffolder
 
     private static void RunDotnet(string workingDirectory, string arguments)
     {
-        var psi = new ProcessStartInfo
-        {
-            FileName = "dotnet",
-            Arguments = arguments,
-            WorkingDirectory = workingDirectory,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true
-        };
-
-        using var process = Process.Start(psi)!;
-        process.WaitForExit(60_000);
-
-        if (process.ExitCode != 0)
-        {
-            var stderr = process.StandardError.ReadToEnd();
-            throw new InvalidOperationException($"dotnet {arguments} failed: {stderr}");
-        }
+        ProcessRunner.Run("dotnet", workingDirectory, arguments, 60_000);
     }
 
     private static void RunGit(string workingDirectory, string arguments)
     {
-        var psi = new ProcessStartInfo
-        {
-            FileName = "git",
-            Arguments = arguments,
-            WorkingDirectory = workingDirectory,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true
-        };
-
-        using var process = Process.Start(psi)!;
-        process.WaitForExit(10_000);
-
-        if (process.ExitCode != 0)
-        {
-            var stderr = process.StandardError.ReadToEnd();
-            throw new InvalidOperationException($"git {arguments} failed: {stderr}");
-        }
+        ProcessRunner.Run("git", workingDirectory, arguments, 10_000);
     }
 }

@@ -14,6 +14,12 @@
     <PackageReference Include="Raylib-cs" Version="7.0.2" />
   </ItemGroup>
 
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleTo">
+      <_Parameter1>FrinkyEngine.Core.Tests</_Parameter1>
+    </AssemblyAttribute>
+  </ItemGroup>
+
   <!-- YogaSharp native library: the package .targets uses a non-standard condition
        (TargetPlatform) so the native DLL never gets copied. Copy it manually. -->
   <ItemGroup Condition="$([MSBuild]::IsOSPlatform('Windows'))">

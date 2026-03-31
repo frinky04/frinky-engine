@@ -17,9 +17,18 @@ public static class ProjectTemplateRegistry
     /// </summary>
     public static void Discover()
     {
+        DiscoverFromBaseDirectory(AppContext.BaseDirectory);
+    }
+
+    /// <summary>
+    /// Scans for project templates relative to a supplied base directory.
+    /// </summary>
+    /// <param name="baseDirectory">The directory used to resolve template layouts.</param>
+    internal static void DiscoverFromBaseDirectory(string baseDirectory)
+    {
         _templates.Clear();
 
-        var templatesDir = FindTemplatesDirectory();
+        var templatesDir = FindTemplatesDirectory(baseDirectory);
         if (templatesDir == null)
         {
             FrinkyLog.Warning("ProjectTemplateRegistry: could not locate ProjectTemplates directory.");
@@ -66,10 +75,9 @@ public static class ProjectTemplateRegistry
     public static ProjectTemplate? GetById(string id) =>
         _templates.Find(t => t.Id == id);
 
-    private static string? FindTemplatesDirectory()
+    private static string? FindTemplatesDirectory(string baseDir)
     {
         // Check alongside the executable first (deployed/output directory)
-        var baseDir = AppContext.BaseDirectory;
         var candidate = Path.Combine(baseDir, "ProjectTemplates");
         if (Directory.Exists(candidate))
             return candidate;

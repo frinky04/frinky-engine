@@ -36,6 +36,14 @@ Auto-generated API documentation from XML comments is available in the [`api/`](
 .\generate-api-docs.bat
 ```
 
+## Testing
+
+Run the automated test suites from the repository root with:
+
+```bash
+dotnet test FrinkyEngine.sln
+```
+
 ## Roadmaps
 
 - [CanvasUI Roadmap](CANVASUI_ROADMAP.md) — retained-mode game UI (active plan)

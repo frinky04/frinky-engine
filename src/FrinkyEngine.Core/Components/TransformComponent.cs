@@ -129,6 +129,9 @@ public class TransformComponent : Component
         }
         set
         {
+            if (WorldPosition == value)
+                return;
+
             if (_parent != null)
             {
                 if (Matrix4x4.Invert(_parent.WorldMatrix, out var parentInverse))
@@ -226,6 +229,9 @@ public class TransformComponent : Component
         }
         set
         {
+            if (WorldRotation == value)
+                return;
+
             if (_parent != null)
             {
                 var parentInverse = Quaternion.Inverse(_parent.WorldRotation);
@@ -249,6 +255,9 @@ public class TransformComponent : Component
     /// </remarks>
     public void SetParent(TransformComponent? newParent)
     {
+        if (_parent == newParent)
+            return;
+
         if (newParent == this) return;
         if (newParent != null && IsAncestorOf(newParent)) return;
 
