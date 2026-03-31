@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Numerics;
+using System.Reflection;
 using BepuPhysics;
 using BepuPhysics.Collidables;
 using BepuPhysics.Constraints;
@@ -18,8 +19,11 @@ internal sealed class PhysicsSystem : IDisposable
     private sealed class PhysicsBodyState
     {
         public required Entity Entity;
-        public required RigidbodyComponent Rigidbody;
+        public RigidbodyComponent? Rigidbody;
         public required ColliderComponent Collider;
+        public required TypedIndex ShapeIndex;
+        public required BodyMotionType MotionType;
+        public bool IsImplicitStatic;
         public BodyHandle? BodyHandle;
         public StaticHandle? StaticHandle;
         public int ConfigurationHash;
@@ -39,52 +43,14 @@ internal sealed class PhysicsSystem : IDisposable
         public bool HasPreviousKinematicTargetPose;
     }
 
-    private readonly struct ShapeCacheKey : IEquatable<ShapeCacheKey>
-    {
-        private readonly byte _shapeType;
-        private readonly float _a;
-        private readonly float _b;
-        private readonly float _c;
-
-        private ShapeCacheKey(byte shapeType, float a, float b, float c)
-        {
-            _shapeType = shapeType;
-            _a = a;
-            _b = b;
-            _c = c;
-        }
-
-        public static ShapeCacheKey Box(float x, float y, float z) => new(0, x, y, z);
-        public static ShapeCacheKey Sphere(float radius) => new(1, radius, 0f, 0f);
-        public static ShapeCacheKey Capsule(float radius, float length) => new(2, radius, length, 0f);
-
-        public bool Equals(ShapeCacheKey other)
-        {
-            return _shapeType == other._shapeType &&
-                   _a.Equals(other._a) &&
-                   _b.Equals(other._b) &&
-                   _c.Equals(other._c);
-        }
-
-        public override bool Equals(object? obj)
-        {
-            return obj is ShapeCacheKey other && Equals(other);
-        }
-
-        public override int GetHashCode()
-        {
-            return HashCode.Combine(_shapeType, _a, _b, _c);
-        }
-    }
-
     private readonly Scene.Scene _scene;
     private readonly BufferPool _bufferPool = new();
     private readonly PhysicsMaterialTable _materialTable = new();
-    private readonly Dictionary<ShapeCacheKey, TypedIndex> _shapeCache = new();
     private readonly Dictionary<Guid, PhysicsBodyState> _bodyStates = new();
     private readonly Dictionary<Guid, CharacterControllerRuntimeState> _characterStates = new();
     private readonly HashSet<Guid> _warnedNoCollider = new();
     private readonly HashSet<Guid> _warnedParented = new();
+    private readonly HashSet<Guid> _warnedImplicitStaticParented = new();
     private readonly HashSet<Guid> _warnedMultipleColliders = new();
     private readonly HashSet<Guid> _warnedMultipleRigidbodies = new();
     private readonly HashSet<Guid> _warnedCharacterMissingRigidbody = new();
@@ -111,6 +77,7 @@ internal sealed class PhysicsSystem : IDisposable
     private HashSet<(Guid, Guid)> _previousCollisionPairs = new();
     private HashSet<(Guid, Guid)> _currentCollisionPairs = new();
     private readonly Dictionary<(Guid, Guid), CollisionContactData> _collisionContactData = new();
+    private static FieldInfo? _poseIntegratorCallbacksField;
 
     private Simulation? _simulation;
     private CharacterControllers? _characterControllers;
@@ -173,6 +140,7 @@ internal sealed class PhysicsSystem : IDisposable
         var sw = Stopwatch.StartNew();
 
         ReconcileParticipants();
+        SyncPoseIntegratorGravity();
 
         var projSettings = PhysicsProjectSettings.Current;
         projSettings.Normalize();
@@ -222,7 +190,7 @@ internal sealed class PhysicsSystem : IDisposable
         int dynamic = 0, kinematic = 0, staticCount = 0;
         foreach (var state in _bodyStates.Values)
         {
-            switch (state.Rigidbody.MotionType)
+            switch (state.MotionType)
             {
                 case BodyMotionType.Dynamic: dynamic++; break;
                 case BodyMotionType.Kinematic: kinematic++; break;
@@ -240,6 +208,21 @@ internal sealed class PhysicsSystem : IDisposable
             ActiveCharacterControllers: _characterStates.Count);
     }
 
+    private void SyncPoseIntegratorGravity()
+    {
+        if (_simulation == null)
+            return;
+
+        _scene.PhysicsSettings.Normalize();
+        var poseIntegrator = _simulation.PoseIntegrator;
+        _poseIntegratorCallbacksField ??= poseIntegrator.GetType().GetField("Callbacks", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+        if (_poseIntegratorCallbacksField?.GetValue(poseIntegrator) is PhysicsPoseIntegratorCallbacks callbacks)
+        {
+            callbacks.Gravity = _scene.PhysicsSettings.Gravity;
+            _poseIntegratorCallbacksField.SetValue(poseIntegrator, callbacks);
+        }
+    }
+
     public void OnComponentStateChanged()
     {
         // Reconciliation runs each frame; this hook exists so components can signal immediate intent.
@@ -252,7 +235,7 @@ internal sealed class PhysicsSystem : IDisposable
 
         if (_bodyStates.TryGetValue(entity.Id, out var state))
         {
-            RemoveBodyState(state);
+            RemoveBodyState(state, entityRemoved: true);
             _bodyStates.Remove(entity.Id);
         }
 
@@ -332,7 +315,7 @@ internal sealed class PhysicsSystem : IDisposable
         state.LastPublishedVisualLocalRotation = normalizedRotation;
         state.HasPublishedVisualPose = true;
 
-        if (state.Rigidbody.MotionType == BodyMotionType.Static)
+        if (state.MotionType == BodyMotionType.Static)
         {
             if (state.StaticHandle is StaticHandle staticHandle && _simulation.Statics.StaticExists(staticHandle))
             {
@@ -348,17 +331,13 @@ internal sealed class PhysicsSystem : IDisposable
             return;
 
         var hasCharacterController = state.Entity.GetComponent<CharacterControllerComponent>() is { Enabled: true };
-        var targetPose = BuildBodyPose(position, normalizedRotation, transform.LocalScale, state.Collider);
-        if (hasCharacterController)
-        {
-            targetPose.Orientation = Quaternion.Identity;
-            var offset = ComputeWorldCenterOffset(state.Collider, transform.LocalScale, targetPose.Orientation);
-            targetPose.Position = position + offset;
-        }
+        var targetPose = hasCharacterController && state.Collider is CapsuleColliderComponent capsule
+            ? BuildCharacterBodyPose(position, transform.LocalScale, capsule)
+            : BuildBodyPose(position, normalizedRotation, transform.LocalScale, state.Collider);
 
         var body = _simulation.Bodies.GetBodyReference(bodyHandle);
         body.Pose = targetPose;
-        if (state.Rigidbody.MotionType == BodyMotionType.Kinematic)
+        if (state.MotionType == BodyMotionType.Kinematic)
         {
             // Teleports should not inject one-frame kinematic velocities into contacts.
             body.Velocity.Linear = Vector3.Zero;
@@ -376,6 +355,7 @@ internal sealed class PhysicsSystem : IDisposable
         }
 
         body.Awake = true;
+        RefreshDynamicLockAnchors(state, targetPose);
         SnapSimulationPoseHistory(state, targetPose, suppressInterpolation: true);
     }
 
@@ -395,7 +375,7 @@ internal sealed class PhysicsSystem : IDisposable
 
         foreach (var state in _bodyStates.Values)
         {
-            if (state.Rigidbody.MotionType != BodyMotionType.Dynamic)
+            if (state.MotionType != BodyMotionType.Dynamic)
             {
                 state.HasPublishedVisualPose = false;
                 state.SuppressInterpolationForFrame = false;
@@ -463,10 +443,13 @@ internal sealed class PhysicsSystem : IDisposable
             return;
 
         var seenEntityIds = new HashSet<Guid>();
+        var entitiesWithAnyRigidbody = new HashSet<Guid>();
         var rigidbodies = _scene.GetComponents<RigidbodyComponent>();
 
         foreach (var rigidbody in rigidbodies)
         {
+            entitiesWithAnyRigidbody.Add(rigidbody.Entity.Id);
+
             if (!rigidbody.Enabled || !rigidbody.Entity.Active)
                 continue;
             if (rigidbody.Entity.Scene != _scene)
@@ -486,6 +469,7 @@ internal sealed class PhysicsSystem : IDisposable
                 continue;
             }
             _warnedParented.Remove(entity.Id);
+            _warnedImplicitStaticParented.Remove(entity.Id);
 
             if (!TryGetPrimaryCollider(entity, out var collider, out var hasMultipleColliders))
             {
@@ -504,56 +488,51 @@ internal sealed class PhysicsSystem : IDisposable
                 _warnedMultipleColliders.Remove(entity.Id);
             }
 
-            var configHash = ComputeConfigurationHash(entity, rigidbody, collider);
-            if (_bodyStates.TryGetValue(entity.Id, out var existing))
+            ReconcileBodyState(entity, rigidbody, collider, rigidbody.MotionType, configurationHash: ComputeConfigurationHash(entity, rigidbody, collider, isImplicitStatic: false), isImplicitStatic: false);
+        }
+
+        var processedImplicitStaticIds = new HashSet<Guid>();
+        var colliders = _scene.GetComponents<ColliderComponent>();
+        foreach (var collider in colliders)
+        {
+            if (!collider.Enabled || !collider.Entity.Active)
+                continue;
+            if (collider.Entity.Scene != _scene)
+                continue;
+
+            var entity = collider.Entity;
+            if (!processedImplicitStaticIds.Add(entity.Id))
+                continue;
+            if (entitiesWithAnyRigidbody.Contains(entity.Id))
+                continue;
+            if (!seenEntityIds.Add(entity.Id))
+                continue;
+
+            if (entity.Transform.Parent != null)
             {
-                if (existing.ConfigurationHash == configHash &&
-                    ReferenceEquals(existing.Rigidbody, rigidbody) &&
-                    ReferenceEquals(existing.Collider, collider))
-                {
-                    continue;
-                }
+                RemoveStateIfPresent(entity.Id);
+                WarnOnce(_warnedImplicitStaticParented, entity.Id, $"Collider-only static '{entity.Name}' is ignored because parented physics participants are not supported.");
+                continue;
+            }
+            _warnedImplicitStaticParented.Remove(entity.Id);
+            _warnedParented.Remove(entity.Id);
 
-                // Capture velocity before destroying body to preserve momentum through rebuild
-                Vector3 preservedLinearVelocity = Vector3.Zero;
-                Vector3 preservedAngularVelocity = Vector3.Zero;
-                bool shouldPreserveVelocity = false;
-
-                if (existing.BodyHandle is BodyHandle bodyHandle &&
-                    _simulation.Bodies.BodyExists(bodyHandle))
-                {
-                    var body = _simulation.Bodies.GetBodyReference(bodyHandle);
-                    preservedLinearVelocity = body.Velocity.Linear;
-                    preservedAngularVelocity = body.Velocity.Angular;
-                    shouldPreserveVelocity = true;
-                }
-
-                RemoveBodyState(existing);
-                _bodyStates.Remove(entity.Id);
-
-                // Create new body and restore velocity to maintain physics continuity
-                var rebuiltState = CreateBodyState(entity, rigidbody, collider, configHash);
-                if (rebuiltState != null)
-                {
-                    _bodyStates[entity.Id] = rebuiltState;
-
-                    if (shouldPreserveVelocity &&
-                        rebuiltState.BodyHandle is BodyHandle newBodyHandle &&
-                        _simulation.Bodies.BodyExists(newBodyHandle))
-                    {
-                        var newBody = _simulation.Bodies.GetBodyReference(newBodyHandle);
-                        newBody.Velocity.Linear = preservedLinearVelocity;
-                        newBody.Velocity.Angular = preservedAngularVelocity;
-                        newBody.Awake = true;
-                    }
-                }
-
+            if (!TryGetPrimaryCollider(entity, out var primaryCollider, out var hasMultipleColliders))
+            {
+                RemoveStateIfPresent(entity.Id);
                 continue;
             }
 
-            var newState = CreateBodyState(entity, rigidbody, collider, configHash);
-            if (newState != null)
-                _bodyStates[entity.Id] = newState;
+            if (hasMultipleColliders)
+            {
+                WarnOnce(_warnedMultipleColliders, entity.Id, $"Entity '{entity.Name}' has multiple collider components. Only the first enabled collider is used.");
+            }
+            else
+            {
+                _warnedMultipleColliders.Remove(entity.Id);
+            }
+
+            ReconcileBodyState(entity, rigidbody: null, primaryCollider, BodyMotionType.Static, configurationHash: ComputeConfigurationHash(entity, null, primaryCollider, isImplicitStatic: true), isImplicitStatic: true);
         }
 
         var staleIds = _bodyStates.Keys.Where(id => !seenEntityIds.Contains(id)).ToList();
@@ -565,6 +544,69 @@ internal sealed class PhysicsSystem : IDisposable
         }
 
         ReconcileCharacterControllers();
+    }
+
+    private void ReconcileBodyState(
+        Entity entity,
+        RigidbodyComponent? rigidbody,
+        ColliderComponent collider,
+        BodyMotionType motionType,
+        int configurationHash,
+        bool isImplicitStatic)
+    {
+        if (_simulation == null)
+            return;
+
+        if (_bodyStates.TryGetValue(entity.Id, out var existing))
+        {
+            if (existing.ConfigurationHash == configurationHash &&
+                ReferenceEquals(existing.Rigidbody, rigidbody) &&
+                ReferenceEquals(existing.Collider, collider) &&
+                existing.MotionType == motionType &&
+                existing.IsImplicitStatic == isImplicitStatic)
+            {
+                return;
+            }
+
+            Vector3 preservedLinearVelocity = Vector3.Zero;
+            Vector3 preservedAngularVelocity = Vector3.Zero;
+            bool shouldPreserveVelocity = false;
+
+            if (existing.MotionType != BodyMotionType.Static &&
+                existing.BodyHandle is BodyHandle bodyHandle &&
+                _simulation.Bodies.BodyExists(bodyHandle))
+            {
+                var body = _simulation.Bodies.GetBodyReference(bodyHandle);
+                preservedLinearVelocity = body.Velocity.Linear;
+                preservedAngularVelocity = body.Velocity.Angular;
+                shouldPreserveVelocity = true;
+            }
+
+            RemoveBodyState(existing);
+            _bodyStates.Remove(entity.Id);
+
+            var rebuiltState = CreateBodyState(entity, rigidbody, collider, motionType, configurationHash, isImplicitStatic);
+            if (rebuiltState == null)
+                return;
+
+            _bodyStates[entity.Id] = rebuiltState;
+
+            if (shouldPreserveVelocity &&
+                rebuiltState.BodyHandle is BodyHandle newBodyHandle &&
+                _simulation.Bodies.BodyExists(newBodyHandle))
+            {
+                var newBody = _simulation.Bodies.GetBodyReference(newBodyHandle);
+                newBody.Velocity.Linear = preservedLinearVelocity;
+                newBody.Velocity.Angular = preservedAngularVelocity;
+                newBody.Awake = true;
+            }
+
+            return;
+        }
+
+        var newState = CreateBodyState(entity, rigidbody, collider, motionType, configurationHash, isImplicitStatic);
+        if (newState != null)
+            _bodyStates[entity.Id] = newState;
     }
 
     private void ReconcileCharacterControllers()
@@ -734,7 +776,13 @@ internal sealed class PhysicsSystem : IDisposable
         _characterBridge.SyncRuntimeState(_simulation, _characterControllers, _characterStates.Values);
     }
 
-    private PhysicsBodyState? CreateBodyState(Entity entity, RigidbodyComponent rigidbody, ColliderComponent collider, int configurationHash)
+    private PhysicsBodyState? CreateBodyState(
+        Entity entity,
+        RigidbodyComponent? rigidbody,
+        ColliderComponent collider,
+        BodyMotionType motionType,
+        int configurationHash,
+        bool isImplicitStatic)
     {
         if (_simulation == null)
             return null;
@@ -742,20 +790,22 @@ internal sealed class PhysicsSystem : IDisposable
         var transform = entity.Transform;
         var authoritativePosition = transform.LocalPosition;
         var authoritativeRotation = NormalizeOrIdentity(transform.LocalRotation);
-        var mass = MathF.Max(0.0001f, rigidbody.Mass);
+        var mass = MathF.Max(0.0001f, rigidbody?.Mass ?? 1f);
         var shapeResult = CreateShape(collider, transform.LocalScale, mass);
-        var pose = BuildBodyPose(authoritativePosition, authoritativeRotation, transform.LocalScale, collider);
-        var continuity = rigidbody.ContinuousDetection
+        var hasCharacterController = motionType == BodyMotionType.Dynamic && entity.GetComponent<CharacterControllerComponent>() is { Enabled: true };
+        var pose = hasCharacterController && collider is CapsuleColliderComponent capsuleCollider
+            ? BuildCharacterBodyPose(authoritativePosition, transform.LocalScale, capsuleCollider)
+            : BuildBodyPose(authoritativePosition, authoritativeRotation, transform.LocalScale, collider);
+        var continuity = rigidbody?.ContinuousDetection == true
             ? ContinuousDetection.Continuous()
             : ContinuousDetection.Discrete;
         var collidable = new CollidableDescription(shapeResult.ShapeIndex, 0.1f, continuity);
         var material = new PhysicsMaterial(collider.Friction, collider.Restitution);
-        var hasCharacterController = entity.GetComponent<CharacterControllerComponent>() is { Enabled: true };
 
         BodyHandle? bodyHandle = null;
         StaticHandle? staticHandle = null;
 
-        switch (rigidbody.MotionType)
+        switch (motionType)
         {
             case BodyMotionType.Dynamic:
             {
@@ -763,10 +813,9 @@ internal sealed class PhysicsSystem : IDisposable
                 if (hasCharacterController)
                 {
                     dynamicInertia.InverseInertiaTensor = default;
-                    pose.Orientation = Quaternion.Identity;
                 }
 
-                var velocity = new BodyVelocity { Linear = rigidbody.InitialLinearVelocity };
+                var velocity = new BodyVelocity { Linear = rigidbody?.InitialLinearVelocity ?? Vector3.Zero };
                 var activity = new BodyActivityDescription(0.01f);
                 var description = BodyDescription.CreateDynamic(pose, velocity, dynamicInertia, collidable, activity);
                 bodyHandle = _simulation.Bodies.Add(description);
@@ -778,7 +827,7 @@ internal sealed class PhysicsSystem : IDisposable
             }
             case BodyMotionType.Kinematic:
             {
-                var velocity = new BodyVelocity { Linear = rigidbody.InitialLinearVelocity };
+                var velocity = new BodyVelocity { Linear = rigidbody?.InitialLinearVelocity ?? Vector3.Zero };
                 var activity = new BodyActivityDescription(0.01f);
                 var description = BodyDescription.CreateKinematic(pose, velocity, collidable, activity);
                 bodyHandle = _simulation.Bodies.Add(description);
@@ -807,10 +856,13 @@ internal sealed class PhysicsSystem : IDisposable
             Entity = entity,
             Rigidbody = rigidbody,
             Collider = collider,
+            ShapeIndex = shapeResult.ShapeIndex,
+            MotionType = motionType,
+            IsImplicitStatic = isImplicitStatic,
             BodyHandle = bodyHandle,
             StaticHandle = staticHandle,
             ConfigurationHash = configurationHash,
-            LockedPosition = authoritativePosition,
+            LockedPosition = pose.Position,
             LockReferenceOrientation = NormalizeOrIdentity(pose.Orientation),
             RotationLockMask = GetRotationLockMask(rigidbody),
             AuthoritativeLocalPosition = authoritativePosition,
@@ -822,7 +874,7 @@ internal sealed class PhysicsSystem : IDisposable
             CurrentSimulationPose = pose,
             HasSimulationPoseHistory = true,
             PreviousKinematicTargetPose = pose,
-            HasPreviousKinematicTargetPose = rigidbody.MotionType == BodyMotionType.Kinematic
+            HasPreviousKinematicTargetPose = motionType == BodyMotionType.Kinematic
         };
     }
 
@@ -835,10 +887,13 @@ internal sealed class PhysicsSystem : IDisposable
         }
     }
 
-    private void RemoveBodyState(PhysicsBodyState state)
+    private void RemoveBodyState(PhysicsBodyState state, bool entityRemoved = false, bool dispatchExitCallbacks = true)
     {
         if (_simulation == null)
             return;
+
+        if (dispatchExitCallbacks)
+            FlushInteractionExitsForEntity(state.Entity.Id, entityRemoved);
 
         if (state.BodyHandle is BodyHandle bodyHandle)
         {
@@ -858,6 +913,8 @@ internal sealed class PhysicsSystem : IDisposable
             if (_simulation.Statics.StaticExists(staticHandle))
                 _simulation.Statics.Remove(staticHandle);
         }
+
+        _simulation.Shapes.Remove(state.ShapeIndex);
     }
 
     private void PushSceneTransformsToPhysics(float stepDt)
@@ -872,7 +929,7 @@ internal sealed class PhysicsSystem : IDisposable
             var currentTransformRotation = NormalizeOrIdentity(transform.LocalRotation);
             var hasCharacterController = state.Entity.GetComponent<CharacterControllerComponent>() is { Enabled: true };
 
-            if (state.Rigidbody.MotionType == BodyMotionType.Static)
+            if (state.MotionType == BodyMotionType.Static)
             {
                 if (state.StaticHandle is not StaticHandle staticHandle || !_simulation.Statics.StaticExists(staticHandle))
                     continue;
@@ -890,7 +947,7 @@ internal sealed class PhysicsSystem : IDisposable
                 continue;
 
             var body = _simulation.Bodies.GetBodyReference(bodyHandle);
-            if (state.Rigidbody.MotionType == BodyMotionType.Kinematic)
+            if (state.MotionType == BodyMotionType.Kinematic)
             {
                 state.AuthoritativeLocalPosition = currentTransformPosition;
                 state.AuthoritativeLocalRotation = currentTransformRotation;
@@ -948,10 +1005,9 @@ internal sealed class PhysicsSystem : IDisposable
 
                 if (positionExternallyEdited)
                 {
-                    var currentPose = body.Pose;
-                    currentPose.Orientation = Quaternion.Identity;
-                    var offset = ComputeWorldCenterOffset(state.Collider, transform.LocalScale, currentPose.Orientation);
-                    currentPose.Position = currentTransformPosition + offset;
+                    var currentPose = state.Collider is CapsuleColliderComponent capsule
+                        ? BuildCharacterBodyPose(currentTransformPosition, transform.LocalScale, capsule)
+                        : body.Pose;
                     body.Pose = currentPose;
                     body.Awake = true;
 
@@ -959,6 +1015,7 @@ internal sealed class PhysicsSystem : IDisposable
                     state.LastPublishedVisualLocalPosition = currentTransformPosition;
                     state.LastPublishedVisualLocalRotation = currentTransformRotation;
                     state.HasPublishedVisualPose = true;
+                    RefreshDynamicLockAnchors(state, currentPose);
                     SnapSimulationPoseHistory(state, currentPose, suppressInterpolation: true);
                 }
 
@@ -975,6 +1032,7 @@ internal sealed class PhysicsSystem : IDisposable
                 state.LastPublishedVisualLocalPosition = currentTransformPosition;
                 state.LastPublishedVisualLocalRotation = currentTransformRotation;
                 state.HasPublishedVisualPose = true;
+                RefreshDynamicLockAnchors(state, targetPose);
                 SnapSimulationPoseHistory(state, targetPose, suppressInterpolation: true);
             }
         }
@@ -987,7 +1045,7 @@ internal sealed class PhysicsSystem : IDisposable
 
         foreach (var state in _bodyStates.Values)
         {
-            if (state.Rigidbody.MotionType != BodyMotionType.Dynamic)
+            if (state.MotionType != BodyMotionType.Dynamic || state.Rigidbody == null)
                 continue;
             if (state.BodyHandle is not BodyHandle bodyHandle || !_simulation.Bodies.BodyExists(bodyHandle))
                 continue;
@@ -1013,7 +1071,7 @@ internal sealed class PhysicsSystem : IDisposable
 
         foreach (var state in _bodyStates.Values)
         {
-            if (state.Rigidbody.MotionType != BodyMotionType.Dynamic)
+            if (state.MotionType != BodyMotionType.Dynamic || state.Rigidbody == null)
                 continue;
             if (state.BodyHandle is not BodyHandle bodyHandle || !_simulation.Bodies.BodyExists(bodyHandle))
                 continue;
@@ -1066,7 +1124,7 @@ internal sealed class PhysicsSystem : IDisposable
 
         foreach (var state in _bodyStates.Values)
         {
-            if (state.Rigidbody.MotionType != BodyMotionType.Dynamic)
+            if (state.MotionType != BodyMotionType.Dynamic)
                 continue;
             if (state.BodyHandle is not BodyHandle bodyHandle || !_simulation.Bodies.BodyExists(bodyHandle))
                 continue;
@@ -1107,15 +1165,10 @@ internal sealed class PhysicsSystem : IDisposable
                 dimensions.Y = MathF.Max(0.001f, dimensions.Y);
                 dimensions.Z = MathF.Max(0.001f, dimensions.Z);
                 var shape = new Box(dimensions.X, dimensions.Y, dimensions.Z);
-                var key = ShapeCacheKey.Box(dimensions.X, dimensions.Y, dimensions.Z);
-                if (!_shapeCache.TryGetValue(key, out var shapeIndex))
-                {
-                    shapeIndex = _simulation.Shapes.Add(shape);
-                    _shapeCache[key] = shapeIndex;
-                }
                 return new ShapeCreationResult
                 {
-                    ShapeIndex = shapeIndex,
+                    // TODO: If collider resizes become hot, replace per-participant ownership with a ref-counted shared shape pool.
+                    ShapeIndex = _simulation.Shapes.Add(shape),
                     DynamicInertia = shape.ComputeInertia(mass)
                 };
             }
@@ -1124,33 +1177,18 @@ internal sealed class PhysicsSystem : IDisposable
                 var radiusScale = MathF.Max(absScale.X, MathF.Max(absScale.Y, absScale.Z));
                 var radius = MathF.Max(0.001f, sphere.Radius * radiusScale);
                 var shape = new Sphere(radius);
-                var key = ShapeCacheKey.Sphere(radius);
-                if (!_shapeCache.TryGetValue(key, out var shapeIndex))
-                {
-                    shapeIndex = _simulation.Shapes.Add(shape);
-                    _shapeCache[key] = shapeIndex;
-                }
                 return new ShapeCreationResult
                 {
-                    ShapeIndex = shapeIndex,
+                    ShapeIndex = _simulation.Shapes.Add(shape),
                     DynamicInertia = shape.ComputeInertia(mass)
                 };
             }
             case CapsuleColliderComponent capsule:
             {
-                var radiusScale = MathF.Max(absScale.X, absScale.Z);
-                var radius = MathF.Max(0.001f, capsule.Radius * radiusScale);
-                var length = MathF.Max(0.001f, capsule.Length * absScale.Y);
-                var shape = new Capsule(radius, length);
-                var key = ShapeCacheKey.Capsule(radius, length);
-                if (!_shapeCache.TryGetValue(key, out var shapeIndex))
-                {
-                    shapeIndex = _simulation.Shapes.Add(shape);
-                    _shapeCache[key] = shapeIndex;
-                }
+                var shape = CreateScaledCapsule(capsule, absScale, capsule.Length);
                 return new ShapeCreationResult
                 {
-                    ShapeIndex = shapeIndex,
+                    ShapeIndex = _simulation.Shapes.Add(shape),
                     DynamicInertia = shape.ComputeInertia(mass)
                 };
             }
@@ -1171,6 +1209,13 @@ internal sealed class PhysicsSystem : IDisposable
         return new RigidPose(position + offset, orientation);
     }
 
+    private static RigidPose BuildCharacterBodyPose(Vector3 position, Vector3 localScale, CapsuleColliderComponent capsule)
+    {
+        var orientation = Quaternion.Identity;
+        var offset = ComputeWorldCenterOffset(capsule, localScale, orientation);
+        return new RigidPose(position + offset, orientation);
+    }
+
     private static Vector3 ComputeWorldCenterOffset(ColliderComponent collider, Vector3 localScale, Quaternion orientation)
     {
         var scaledCenter = new Vector3(
@@ -1180,23 +1225,38 @@ internal sealed class PhysicsSystem : IDisposable
         return Vector3.Transform(scaledCenter, orientation);
     }
 
-    private static int ComputeConfigurationHash(Entity entity, RigidbodyComponent rigidbody, ColliderComponent collider)
+    private static Capsule CreateScaledCapsule(CapsuleColliderComponent capsule, Vector3 absScale, float lengthOverride)
+    {
+        var radiusScale = MathF.Max(absScale.X, absScale.Z);
+        var radius = MathF.Max(0.001f, capsule.Radius * radiusScale);
+        var length = MathF.Max(0.001f, lengthOverride * absScale.Y);
+        return new Capsule(radius, length);
+    }
+
+    private static int ComputeConfigurationHash(Entity entity, RigidbodyComponent? rigidbody, ColliderComponent collider, bool isImplicitStatic)
     {
         var hash = new HashCode();
-        hash.Add(rigidbody.SettingsVersion);
+        hash.Add(isImplicitStatic);
+        if (rigidbody != null)
+        {
+            hash.Add(rigidbody.SettingsVersion);
+            hash.Add((int)rigidbody.MotionType);
+        }
         hash.Add(collider.SettingsVersion);
-        hash.Add((int)rigidbody.MotionType);
         hash.Add(collider.GetType());
         hash.Add(collider.IsTrigger);
         hash.Add(entity.Transform.LocalScale.X);
         hash.Add(entity.Transform.LocalScale.Y);
         hash.Add(entity.Transform.LocalScale.Z);
-        hash.Add(entity.GetComponent<CharacterControllerComponent>() is { Enabled: true });
+        hash.Add(!isImplicitStatic && entity.GetComponent<CharacterControllerComponent>() is { Enabled: true });
         return hash.ToHashCode();
     }
 
-    private static byte GetRotationLockMask(RigidbodyComponent rigidbody)
+    private static byte GetRotationLockMask(RigidbodyComponent? rigidbody)
     {
+        if (rigidbody == null)
+            return 0;
+
         byte mask = 0;
         if (rigidbody.LockRotationX)
             mask |= RotationLockXMask;
@@ -1404,6 +1464,9 @@ internal sealed class PhysicsSystem : IDisposable
 
     private static bool ShouldInterpolateBody(PhysicsBodyState state, PhysicsProjectSettings settings)
     {
+        if (state.Rigidbody == null)
+            return false;
+
         return state.Rigidbody.InterpolationMode switch
         {
             RigidbodyInterpolationMode.None => false,
@@ -1429,6 +1492,14 @@ internal sealed class PhysicsSystem : IDisposable
         return new RigidPose(
             Vector3.Lerp(previous.Position, current.Position, clampedAlpha),
             NormalizeOrIdentity(Quaternion.Slerp(previousOrientation, currentOrientation, clampedAlpha)));
+    }
+
+    private static void RefreshDynamicLockAnchors(PhysicsBodyState state, RigidPose pose)
+    {
+        state.LockedPosition = pose.Position;
+        state.RotationLockMask = GetRotationLockMask(state.Rigidbody);
+        if (state.RotationLockMask != 0)
+            state.LockReferenceOrientation = NormalizeOrIdentity(pose.Orientation);
     }
 
     private static void CaptureSimulationPoseAfterStep(PhysicsBodyState state, RigidPose pose)
@@ -1519,31 +1590,85 @@ internal sealed class PhysicsSystem : IDisposable
     {
         var entityA = _scene.FindEntityById(entityIdA);
         var entityB = _scene.FindEntityById(entityIdB);
-        if (entityA == null || entityB == null)
-            return;
+        if (entityA != null && entityB != null)
+        {
+            DispatchTriggerCallbackToEntity(entityA, entityB, eventType);
+            DispatchTriggerCallbackToEntity(entityB, entityA, eventType);
+        }
+    }
 
-        // Snapshot component lists — user scripts may add/remove components during callbacks.
-        foreach (var component in entityA.Components.ToList())
+    private static void DispatchTriggerCallbackToEntity(Entity target, Entity other, TriggerEventType eventType)
+    {
+        foreach (var component in target.Components.ToList())
         {
             if (!component.Enabled)
                 continue;
             switch (eventType)
             {
-                case TriggerEventType.Enter: Entity.SafeInvokeLifecycle(component, "OnTriggerEnter", () => component.OnTriggerEnter(entityB)); break;
-                case TriggerEventType.Stay: Entity.SafeInvokeLifecycle(component, "OnTriggerStay", () => component.OnTriggerStay(entityB)); break;
-                case TriggerEventType.Exit: Entity.SafeInvokeLifecycle(component, "OnTriggerExit", () => component.OnTriggerExit(entityB)); break;
+                case TriggerEventType.Enter: Entity.SafeInvokeLifecycle(component, "OnTriggerEnter", () => component.OnTriggerEnter(other)); break;
+                case TriggerEventType.Stay: Entity.SafeInvokeLifecycle(component, "OnTriggerStay", () => component.OnTriggerStay(other)); break;
+                case TriggerEventType.Exit: Entity.SafeInvokeLifecycle(component, "OnTriggerExit", () => component.OnTriggerExit(other)); break;
+            }
+        }
+    }
+
+    private void FlushInteractionExitsForEntity(Guid entityId, bool entityRemoved)
+    {
+        var triggerPairsToFlush = _previousTriggerPairs
+            .Concat(_currentTriggerPairs)
+            .Where(pair => pair.Item1 == entityId || pair.Item2 == entityId)
+            .Distinct()
+            .ToList();
+        foreach (var pair in triggerPairsToFlush)
+        {
+            _previousTriggerPairs.Remove(pair);
+            _currentTriggerPairs.Remove(pair);
+
+            var removedEntity = _scene.FindEntityById(entityId);
+            var otherId = pair.Item1 == entityId ? pair.Item2 : pair.Item1;
+            var otherEntity = _scene.FindEntityById(otherId);
+            if (otherEntity == null)
+                continue;
+
+            if (entityRemoved)
+            {
+                if (removedEntity != null)
+                    DispatchTriggerCallbackToEntity(otherEntity, removedEntity, TriggerEventType.Exit);
+            }
+            else if (removedEntity != null)
+            {
+                DispatchTriggerCallbackToEntity(removedEntity, otherEntity, TriggerEventType.Exit);
+                DispatchTriggerCallbackToEntity(otherEntity, removedEntity, TriggerEventType.Exit);
             }
         }
 
-        foreach (var component in entityB.Components.ToList())
+        var collisionPairsToFlush = _previousCollisionPairs
+            .Concat(_currentCollisionPairs)
+            .Where(pair => pair.Item1 == entityId || pair.Item2 == entityId)
+            .Distinct()
+            .ToList();
+        foreach (var pair in collisionPairsToFlush)
         {
-            if (!component.Enabled)
+            _previousCollisionPairs.Remove(pair);
+            _currentCollisionPairs.Remove(pair);
+            _collisionContactData.TryGetValue(pair, out var contact);
+            _collisionContactData.Remove(pair);
+
+            var removedEntity = _scene.FindEntityById(entityId);
+            var otherId = pair.Item1 == entityId ? pair.Item2 : pair.Item1;
+            var otherEntity = _scene.FindEntityById(otherId);
+            if (otherEntity == null)
                 continue;
-            switch (eventType)
+
+            if (entityRemoved)
             {
-                case TriggerEventType.Enter: Entity.SafeInvokeLifecycle(component, "OnTriggerEnter", () => component.OnTriggerEnter(entityA)); break;
-                case TriggerEventType.Stay: Entity.SafeInvokeLifecycle(component, "OnTriggerStay", () => component.OnTriggerStay(entityA)); break;
-                case TriggerEventType.Exit: Entity.SafeInvokeLifecycle(component, "OnTriggerExit", () => component.OnTriggerExit(entityA)); break;
+                if (removedEntity != null)
+                    DispatchCollisionCallbackToEntity(otherEntity, removedEntity, contact, normalPointsTowardTarget: otherId == pair.Item1, CollisionEventType.Exit);
+            }
+            else if (removedEntity != null)
+            {
+                DispatchCollisionCallbackToEntity(removedEntity, otherEntity, contact, normalPointsTowardTarget: entityId == pair.Item1, CollisionEventType.Exit);
+                DispatchCollisionCallbackToEntity(otherEntity, removedEntity, contact, normalPointsTowardTarget: otherId == pair.Item1, CollisionEventType.Exit);
             }
         }
     }
@@ -1726,6 +1851,8 @@ internal sealed class PhysicsSystem : IDisposable
         public Vector3 HitNormal;
         public CollidableReference HitCollidable;
         public bool HasHit;
+        public bool StartedOverlapped;
+        public Vector3 OverlapOrigin;
         public RaycastFilter Filter;
 
         public bool AllowTest(CollidableReference collidable) => Filter.AllowCollidable(collidable);
@@ -1747,20 +1874,23 @@ internal sealed class PhysicsSystem : IDisposable
         public void OnHitAtZeroT(ref float maximumT, CollidableReference collidable)
         {
             // Overlapping at start — treat as hit at distance 0
+            // TODO: If gameplay needs a separating direction here, derive it from a dedicated penetration query instead of returning a zero normal.
             if (!HasHit)
             {
                 ClosestT = 0f;
-                HitLocation = Vector3.Zero;
+                HitLocation = OverlapOrigin;
                 HitNormal = Vector3.Zero;
                 HitCollidable = collidable;
                 HasHit = true;
+                StartedOverlapped = true;
             }
         }
     }
 
     private struct AllSweepHitsHandler : ISweepHitHandler
     {
-        public List<(float T, Vector3 Location, Vector3 Normal, CollidableReference Collidable)> Hits;
+        public List<(float T, Vector3 Location, Vector3 Normal, CollidableReference Collidable, bool StartedOverlapped)> Hits;
+        public Vector3 OverlapOrigin;
         public RaycastFilter Filter;
 
         public bool AllowTest(CollidableReference collidable) => Filter.AllowCollidable(collidable);
@@ -1768,12 +1898,12 @@ internal sealed class PhysicsSystem : IDisposable
 
         public void OnHit(ref float maximumT, float t, in Vector3 hitLocation, in Vector3 hitNormal, CollidableReference collidable)
         {
-            Hits.Add((t, hitLocation, hitNormal, collidable));
+            Hits.Add((t, hitLocation, hitNormal, collidable, false));
         }
 
         public void OnHitAtZeroT(ref float maximumT, CollidableReference collidable)
         {
-            Hits.Add((0f, Vector3.Zero, Vector3.Zero, collidable));
+            Hits.Add((0f, OverlapOrigin, Vector3.Zero, collidable, true));
         }
     }
 
@@ -1795,6 +1925,8 @@ internal sealed class PhysicsSystem : IDisposable
         {
             ClosestT = float.MaxValue,
             HasHit = false,
+            StartedOverlapped = false,
+            OverlapOrigin = pose.Position,
             Filter = filter,
         };
 
@@ -1813,6 +1945,7 @@ internal sealed class PhysicsSystem : IDisposable
             Point = handler.HitLocation,
             Normal = handler.HitNormal,
             Distance = handler.ClosestT * maxDistance,
+            StartedOverlapped = handler.StartedOverlapped,
         };
         return true;
     }
@@ -1833,13 +1966,14 @@ internal sealed class PhysicsSystem : IDisposable
         var filter = BuildRaycastFilter(raycastParams);
         var handler = new AllSweepHitsHandler
         {
-            Hits = new List<(float, Vector3, Vector3, CollidableReference)>(),
+            Hits = new List<(float, Vector3, Vector3, CollidableReference, bool)>(),
+            OverlapOrigin = pose.Position,
             Filter = filter,
         };
 
         _simulation.Sweep(shape, pose, velocity, 1f, _bufferPool, ref handler);
 
-        foreach (var (t, location, normal, collidable) in handler.Hits)
+        foreach (var (t, location, normal, collidable, startedOverlapped) in handler.Hits)
         {
             var entity = ResolveCollidableToEntity(collidable);
             if (entity == null)
@@ -1851,6 +1985,7 @@ internal sealed class PhysicsSystem : IDisposable
                 Point = location,
                 Normal = normal,
                 Distance = t * maxDistance,
+                StartedOverlapped = startedOverlapped,
             });
         }
 
@@ -1904,6 +2039,43 @@ internal sealed class PhysicsSystem : IDisposable
         }
 
         return results;
+    }
+
+    internal bool CanCharacterStand(CharacterControllerComponent controller, CapsuleColliderComponent capsule, float standingLength)
+    {
+        if (_simulation == null)
+            return true;
+
+        var transform = controller.Entity.Transform;
+        var absScale = new Vector3(MathF.Abs(transform.LocalScale.X), MathF.Abs(transform.LocalScale.Y), MathF.Abs(transform.LocalScale.Z));
+        absScale.X = MathF.Max(absScale.X, 0.0001f);
+        absScale.Y = MathF.Max(absScale.Y, 0.0001f);
+        absScale.Z = MathF.Max(absScale.Z, 0.0001f);
+
+        var raycastParams = new RaycastParams();
+        raycastParams.IgnoreEntityTree(controller.Entity);
+
+        var scaledCenter = new Vector3(
+            capsule.Center.X * transform.LocalScale.X,
+            capsule.Center.Y * transform.LocalScale.Y,
+            capsule.Center.Z * transform.LocalScale.Z);
+        var scaledRadius = MathF.Max(0.001f, capsule.Radius * MathF.Max(absScale.X, absScale.Z));
+        var currentScaledLength = MathF.Max(0.001f, capsule.Length * absScale.Y);
+        var standingScaledLength = MathF.Max(0.001f, standingLength * absScale.Y);
+        var standHeightDelta = standingScaledLength - currentScaledLength;
+        if (standHeightDelta <= 0.001f)
+            return true;
+
+        var currentTopCenter = transform.LocalPosition + scaledCenter + Vector3.UnitY * (currentScaledLength * 0.5f);
+        var upwardTravel = controller.Supported ? standHeightDelta : standHeightDelta * 0.5f;
+        if (upwardTravel <= 0.001f)
+            return true;
+
+        var shape = new Sphere(scaledRadius);
+        var pose = new RigidPose(currentTopCenter);
+
+        // TODO: If gameplay collision filtering grows beyond triggers, expand the uncrouch headroom query to honor those filters too.
+        return !SweepClosest(shape, pose, Vector3.UnitY, upwardTravel, out _, raycastParams);
     }
 
     // --- Collision event processing ---
@@ -1987,48 +2159,32 @@ internal sealed class PhysicsSystem : IDisposable
     {
         var entityA = _scene.FindEntityById(entityIdA);
         var entityB = _scene.FindEntityById(entityIdB);
-        if (entityA == null || entityB == null)
-            return;
-
-        // Normal is stored pointing from Item2 toward Item1 (canonical order).
-        // Item1 = entityIdA, Item2 = entityIdB, so normal points toward A.
-        var infoForA = new CollisionInfo
+        if (entityA != null && entityB != null)
         {
-            Other = entityB,
-            ContactPoint = contact.WorldContactPoint,
-            Normal = contact.Normal,
-            PenetrationDepth = contact.Depth,
-        };
-        var infoForB = new CollisionInfo
-        {
-            Other = entityA,
-            ContactPoint = contact.WorldContactPoint,
-            Normal = -contact.Normal,
-            PenetrationDepth = contact.Depth,
-        };
-
-        // Snapshot component lists — user scripts may add/remove components during callbacks.
-        foreach (var component in entityA.Components.ToList())
-        {
-            if (!component.Enabled)
-                continue;
-            switch (eventType)
-            {
-                case CollisionEventType.Enter: Entity.SafeInvokeLifecycle(component, "OnCollisionEnter", () => component.OnCollisionEnter(infoForA)); break;
-                case CollisionEventType.Stay: Entity.SafeInvokeLifecycle(component, "OnCollisionStay", () => component.OnCollisionStay(infoForA)); break;
-                case CollisionEventType.Exit: Entity.SafeInvokeLifecycle(component, "OnCollisionExit", () => component.OnCollisionExit(infoForA)); break;
-            }
+            DispatchCollisionCallbackToEntity(entityA, entityB, contact, normalPointsTowardTarget: true, eventType);
+            DispatchCollisionCallbackToEntity(entityB, entityA, contact, normalPointsTowardTarget: false, eventType);
         }
+    }
 
-        foreach (var component in entityB.Components.ToList())
+    private static void DispatchCollisionCallbackToEntity(Entity target, Entity other, CollisionContactData contact, bool normalPointsTowardTarget, CollisionEventType eventType)
+    {
+        var info = new CollisionInfo
+        {
+            Other = other,
+            ContactPoint = contact.WorldContactPoint,
+            Normal = normalPointsTowardTarget ? contact.Normal : -contact.Normal,
+            PenetrationDepth = contact.Depth,
+        };
+
+        foreach (var component in target.Components.ToList())
         {
             if (!component.Enabled)
                 continue;
             switch (eventType)
             {
-                case CollisionEventType.Enter: Entity.SafeInvokeLifecycle(component, "OnCollisionEnter", () => component.OnCollisionEnter(infoForB)); break;
-                case CollisionEventType.Stay: Entity.SafeInvokeLifecycle(component, "OnCollisionStay", () => component.OnCollisionStay(infoForB)); break;
-                case CollisionEventType.Exit: Entity.SafeInvokeLifecycle(component, "OnCollisionExit", () => component.OnCollisionExit(infoForB)); break;
+                case CollisionEventType.Enter: Entity.SafeInvokeLifecycle(component, "OnCollisionEnter", () => component.OnCollisionEnter(info)); break;
+                case CollisionEventType.Stay: Entity.SafeInvokeLifecycle(component, "OnCollisionStay", () => component.OnCollisionStay(info)); break;
+                case CollisionEventType.Exit: Entity.SafeInvokeLifecycle(component, "OnCollisionExit", () => component.OnCollisionExit(info)); break;
             }
         }
     }
@@ -2045,12 +2201,11 @@ internal sealed class PhysicsSystem : IDisposable
             return;
 
         foreach (var state in _bodyStates.Values.ToList())
-            RemoveBodyState(state);
+            RemoveBodyState(state, dispatchExitCallbacks: false);
 
         _bodyStates.Clear();
         _characterStates.Clear();
         _materialTable.Clear();
-        _shapeCache.Clear();
         _bodyHandleToEntityId.Clear();
         _staticHandleToEntityId.Clear();
         _triggerBodyHandles.Clear();
@@ -2062,6 +2217,7 @@ internal sealed class PhysicsSystem : IDisposable
         _collisionContactData.Clear();
         _warnedNoCollider.Clear();
         _warnedParented.Clear();
+        _warnedImplicitStaticParented.Clear();
         _warnedMultipleColliders.Clear();
         _warnedMultipleRigidbodies.Clear();
         _warnedCharacterMissingRigidbody.Clear();

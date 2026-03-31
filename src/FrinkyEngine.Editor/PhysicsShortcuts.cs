@@ -11,7 +11,7 @@ namespace FrinkyEngine.Editor;
 public static class PhysicsShortcuts
 {
     /// <summary>
-    /// Adds a collider (auto-detected from mesh/primitive) with no rigidbody, making a static collision shape.
+    /// Adds a collider (auto-detected from mesh/primitive) with no rigidbody, making an engine-supported static collidable.
     /// </summary>
     public static bool AddStaticBody(Entity entity, EditorApplication app)
     {
@@ -26,7 +26,7 @@ public static class PhysicsShortcuts
         AddAutoCollider(entity);
         app.RefreshUndoBaseline();
         NotificationManager.Instance.Post(
-            $"Added static collider to {entity.Name}", NotificationType.Info, 1.5f);
+            $"Added static collidable to {entity.Name}", NotificationType.Info, 1.5f);
         return true;
     }
 

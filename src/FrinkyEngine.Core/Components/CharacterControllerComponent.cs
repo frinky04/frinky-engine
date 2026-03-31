@@ -353,8 +353,16 @@ public class CharacterControllerComponent : Component
         if (!_isCrouching)
             return;
 
-        // TODO: Add ceiling check (overlap/sweep test) before allowing stand-up.
-        // Without physics queries, the capsule will clip through low geometry above.
+        var capsule = Entity.GetComponent<CapsuleColliderComponent>();
+        if (capsule != null &&
+            capsule.Enabled &&
+            _standingCapsuleLength > 0f &&
+            Entity.Scene?.PhysicsSystem is { } physicsSystem &&
+            !physicsSystem.CanCharacterStand(this, capsule, _standingCapsuleLength))
+        {
+            return;
+        }
+
         _isCrouching = false;
         ApplyCrouchToCapsule(false);
     }

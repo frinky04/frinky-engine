@@ -12,11 +12,17 @@ Add a `RigidbodyComponent` to give an entity physics behavior. Three motion type
 | **Kinematic** | Moves via transform, pushes dynamic bodies but is not affected by forces |
 | **Static** | Immovable, used for terrain and walls |
 
+Collider-only entities are also supported as true static collidables. If an entity has an enabled collider but no `RigidbodyComponent`, physics registers it as a static collider or trigger.
+
 ### Kinematic Stability
 
 - Contact-driving velocity is derived from consecutive kinematic target poses (continuity-aware), not from arbitrary pose snaps
 - Kinematic linear and angular contact velocities are safety-clamped to avoid extreme one-frame impulses
 - Large discontinuities (e.g. sudden large rotation jumps) are treated as teleport-style corrections for that step, with kinematic velocity suppressed
+
+## Scene Gravity
+
+Scene gravity comes from `Scene.PhysicsSettings.Gravity`. Runtime gravity changes apply immediately to the active simulation, including changes made through the `physics_gravity` console cvar.
 
 ## Colliders
 
@@ -60,7 +66,7 @@ public class PickupZone : Component
 }
 ```
 
-Both entities in the overlap receive callbacks. At least one of the two colliders must have `IsTrigger` enabled. Trigger colliders still require a `RigidbodyComponent` on the same entity to participate in physics — the motion type can be Static, Kinematic, or Dynamic.
+Both entities in the overlap receive callbacks. At least one of the two colliders must have `IsTrigger` enabled. Trigger colliders can be collider-only statics or can use a `RigidbodyComponent` with Static, Kinematic, or Dynamic motion.
 
 ## Raycasting
 
@@ -182,6 +188,9 @@ if (Physics.CapsuleCast(origin, 0.5f, 1f, Quaternion.Identity, direction, 20f, o
 | `Point` | `Vector3` | World-space impact point |
 | `Normal` | `Vector3` | Surface normal at impact |
 | `Distance` | `float` | Distance from sweep origin to hit |
+| `StartedOverlapped` | `bool` | `true` when the cast began already overlapping the collider |
+
+When `StartedOverlapped` is `true`, `Distance` is `0`, `Point` is the sweep origin, and `Normal` is `Vector3.Zero` because BEPU does not provide a resolved separating normal for initial overlaps.
 
 ## Overlap Queries
 
@@ -273,6 +282,7 @@ The character controller has built-in crouch support:
 - Crouching shrinks the capsule height by `CrouchHeightScale` (default 50%) and reduces move speed by `CrouchSpeedScale` (default 50%)
 - The entity position is adjusted to keep feet on the ground
 - Velocity is preserved through the physics body rebuild that occurs during capsule resizing
+- `Stand()` can fail when blocked by solid geometry overhead; in that case the controller stays crouched
 
 `SimplePlayerInputComponent` provides automatic crouch handling with Left Ctrl (configurable via `CrouchKey`), including camera height blending:
 
@@ -294,7 +304,7 @@ Three presets are available:
 
 | Preset | What it adds |
 |--------|-------------|
-| **Static** | Collider only (no rigidbody) — for floors, walls, and static geometry |
+| **Static** | Collider only (no rigidbody) — registered by the engine as a static collidable for floors, walls, and static geometry |
 | **Dynamic** | Collider + Rigidbody (Dynamic) — for objects affected by gravity and forces |
 | **Kinematic** | Collider + Rigidbody (Kinematic) — for objects moved by code that push dynamic bodies |
 

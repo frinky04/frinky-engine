@@ -27,4 +27,10 @@ public readonly struct ShapeCastHit
     /// Distance from the sweep origin to the hit point.
     /// </summary>
     public float Distance { get; init; }
+
+    /// <summary>
+    /// True when the cast began already overlapping the hit collider.
+    /// In that case, <see cref="Distance"/> is zero and <see cref="Normal"/> is not resolved.
+    /// </summary>
+    public bool StartedOverlapped { get; init; }
 }

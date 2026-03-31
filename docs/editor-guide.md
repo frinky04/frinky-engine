@@ -71,7 +71,7 @@ Build game assemblies from the editor with `File -> Build Scripts` (`Ctrl+B`). T
 
 ## Quick-Add Physics
 
-Right-click an entity in the Hierarchy and select **Add Physics** to quickly add collider and rigidbody components. Three presets are available: **Static Body** (collider only), **Dynamic Body** (collider + dynamic rigidbody), and **Kinematic Body** (collider + kinematic rigidbody). The collider shape and size are auto-detected from the entity's primitive component (Cube, Sphere, Cylinder, or Plane). The same shortcuts are available in the Inspector under **Quick Add Physics**.
+Right-click an entity in the Hierarchy and select **Add Physics** to quickly add collider and rigidbody components. Three presets are available: **Static Body** (collider only, registered as a static collidable), **Dynamic Body** (collider + dynamic rigidbody), and **Kinematic Body** (collider + kinematic rigidbody). The collider shape and size are auto-detected from the entity's primitive component (Cube, Sphere, Cylinder, or Plane). The same shortcuts are available in the Inspector under **Quick Add Physics**.
 
 ## Physics Hitbox Preview
 
