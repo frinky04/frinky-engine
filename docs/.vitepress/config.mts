@@ -5,7 +5,7 @@ export default defineConfig({
   description: "Documentation for the FrinkyEngine editor, runtime, and game development workflow.",
   lastUpdated: true,
   cleanUrls: true,
-  base: "/FrinkyEngine/",
+  base: "/frinky-engine/",
   // Generated docs/api pages currently contain some unresolved xmldoc2md links.
   // Keep the site buildable without editing generated output.
   ignoreDeadLinks: true,
