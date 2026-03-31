@@ -1,0 +1,29 @@
+# Agent Notes
+
+## API Pitfalls
+
+- **Raylib-cs `Shader.Locs`** is a pointer. Use `unsafe` and cache locations in `int` fields.
+- **Renderer resource ownership**: components no longer own `RenderModel` state. Mesh/material/skinned-instance lifetimes live in `RenderResourceCache`, and tooling/picking should go through `RenderGeometryQueries` instead of touching Raylib models on components.
+- **Forward+ texture binding workaround**: the Raylib backend still maps light/tile/triplanar sampler uniforms onto Raylib material map slots (`Occlusion`, `Emission`, `Height`, `Brdf`) because `SetShaderValueTexture()` becomes unreliable after `DrawRenderBatchActive()`. Do not reuse those slots casually without auditing backend bindings.
+- **Raylib instanced draw submission**: `Raylib.DrawMeshInstanced()` currently expects an exact-length transform array in this codebase. Reusing a larger capacity-backed buffer caused duplicate mesh/primitive batches to disappear; keep instanced submissions on tightly sized arrays unless that path is revalidated.
+- **Selection mask + auto-instancing**: `Shaders/selection_mask.vs` supports skinning but does not implement instancing (`instanceTransform` / `useInstancing`). Do not route the selection-mask pass through `DrawMeshInstanced()` unless that shader is upgraded first; it caused large parts of the scene to disappear after clicking/selecting in the viewport.
+- **Renderer world-bounds cache + parented physics**: do not key cached world bounds only off a renderable's local `TransformVersion`. A child under a moving parent/rigidbody can keep the same local version while its `WorldMatrix` changes every frame, which causes frustum culling to use stale bounds and drop visible meshes in play mode.
+- **Mesh renderer material slots**: `MeshRendererComponent.MaterialSlots` is a fixed-size inspector list and must be synchronized to the assigned model's `MaterialCount` whenever `ModelPath` changes or a component is deserialized. If not, new mesh renderers show zero editable slots and materials appear unassignable.
+- **Raylib animation math conventions**: for skinning-critical codepaths, prefer `Raymath.MatrixMultiply`, `MatrixInvert`, `QuaternionToMatrix`, and related helpers over hand-rolled `System.Numerics` composition; matrix order assumptions are easy to get wrong and can cause catastrophic mesh deformation.
+- **IK pose spaces**: sample animation, convert to local-space, run IK in local-space, then convert back to model-space for skinning matrix reconstruction. Avoid interpolating IK input in model-space.
+- **IK activation gating**: only run the IK pipeline when at least one solver is truly runnable for the current hierarchy, not merely present/enabled. Otherwise stay on the non-IK animation path.
+- **ImGuizmo state is global**: if multiple gizmo paths exist (entity transform + inspector handle), never gate one path on `ImGuizmo.IsUsing()` from the other path. Choose one active path explicitly and call only that manipulator for the frame.
+- **RLGL depth state + batching**: when toggling depth test for editor overlays, call `Rlgl.DrawRenderBatchActive()` before and after the overlay draw block. Otherwise mixed batch flush timing can cause partial or unstable depth ordering.
+- **ImGuizmo bounds mode for box colliders**: use `ImGuizmoOperation.Bounds | ImGuizmoOperation.Translate` with unit bounds (`-0.5..0.5`). `localBounds` is input-only, and `changed` / `matrix` can be stale on active frames, so fall back to `deltaMatrix * originalMatrix` when needed.
+- **RlImGui** (`RlImGui.cs`): call `Rlgl.DrawRenderBatchActive()` after each draw command in `End()`.
+- **Raylib cursor**: `DisableCursor()` / `EnableCursor()` re-center the mouse. Only call them on state transitions.
+- **CanvasUI panel lifecycle**: `Panel.AddChild(Panel child)` must invoke `OnCreated()` for first-time attachments. Reparenting existing initialized panels should not re-run creation hooks.
+- **CanvasUI hit testing + overflow clip**: hit testing must respect ancestor `overflow: hidden` clipping so visually clipped or scrolled-out children are not interactive.
+- **CanvasUI font fallback ownership**: if `FontManager` falls back to `Raylib.GetFontDefault()`, treat it as engine-owned and never unload it.
+- **CanvasUI wheel bubbling**: `OnMouseWheel` uses `MouseWheelEvent` (`Delta`, `Handled`). Set `Handled = true` only when scroll was actually consumed; otherwise let ancestor scroll containers receive the event.
+
+## Current Workarounds
+
+- **Asset icon generation cadence**: icon generation is intentionally throttled in `AssetIconService` (`MinJobIntervalSeconds = 0.2`) to keep editor frame impact low. Adjust this constant if startup icon warmup speed matters more than smoother frame pacing.
+- **Scene prefab repair tool**: `Edit -> Fix Scene Prefabs` rebuilds every prefab instance in the current scene from its source asset while preserving placement and stored prefab overrides. Use it when old scene/prefab instance graphs appear stale after engine-side prefab or renderer refactors.
+- **Renderer graph transition**: `SceneRenderer.RenderView(RenderViewRequest)` is the new extraction/culling/backend path, but editor/runtime post-processing, selection outline composite, upscale, and final UI overlays are still manually orchestrated outside the renderer. Existing `Render()`, `RenderDepthPrePass()`, and `RenderSelectionMask()` methods are compatibility shims until that composition is pulled into the render graph.
